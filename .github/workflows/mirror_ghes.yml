@@ -1,0 +1,129 @@
+name: Mirror upstream PRs to GHES
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: pr-mirror
+  cancel-in-progress: false
+
+jobs:
+  mirror_upstream_prs:
+    runs-on: ubuntu-latest
+    env:
+      UPSTREAM_OWNER: quic
+      UPSTREAM_REPO: efficient-transformers
+      GHES_OWNER: qraniumtest
+      GHES_REPO: efficient-transformers
+    steps:
+      - name: Install tools
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y jq
+
+      - name: Fetch open PRs from upstream
+        id: fetch
+        run: |
+          set -euo pipefail
+          PAGE=1
+          PRS="[]"
+          while : ; do
+              RESP=$(curl -s "https://api.github.com/repos/${UPSTREAM_OWNER}/{UPSTREAM_REPO}/pulls?state=open&per_page=100&page=${PAGE}")
+              COUNT=$(echo "$RESP" | jq 'length')
+              PR=$(jq -s 'add' <(echo "$PRS") <(echo "$RESP"))
+              if [ "$COUNT" -lt 100 ]; then break; fi
+              PAGE=$((PAGE+1))
+          done
+          echo "$PRS" > pr_list.json
+          echo "count=$(jq 'length' pr_list.json)" >> $GITHUB_OUTPUT
+          echo "Open PRs: $(jq 'length' pr_list.json)"
+      - name: Mirror each PR branch to GHES and open/update PR
+          if: steps.fetch.output.count != '0'
+          env:
+            GHES_PAT: ${{ secrets.GHES_PAT }}
+          run: |
+            set -euo pipefail
+            git init
+            git config user.email "pr-mirror@local"
+            git config user.name "pr-mirror"
+            git remote add ghes https://x-access-token:${GHES_PAT}@github.qualcomm.com/qraniumtest/efficient-transformers.git
+
+            jq -c '.[] | {
+                number,
+                title,
+                body,
+                head_sha: .head.sha,
+                html_url
+              }' pr_list.json | while read -r pr; do
+              NUM=$(echo "$pr" | jq -r .number)
+              TITLE=$(echo "$pr" | jq -r .title)
+              BODY=$(echo "$pr" | jq -r .body)
+              HEAD_SHA=$(echo "$pr" | jq -r .head_sha)
+              URL=$(echo "$pr" | jq -r .html_url)
+              BRANCH="upstream-pr-${NUM}"
+              echo "Processing PR #${NUM} -> branch ${BRANCH}"
+  
+              # Fetch PR head and push to GHES
+              git fetch --no-tags --depth=1 upstream +refs/pull/${NUM}/head:${BRANCH}
+              git checkout -B ${BRANCH} ${BRANCH}
+              git push ghes ${BRANCH}:${BRANCH} --force
+  
+              #Build PR body with link and head SHA
+              PR_BODY="Mirrored from ${URL}%0AHead SHA:${HEAD_SHA}%0A%0A${BODY//[$'\r\n']/}"
+              API="https://github.qualcomm.com/api/v3/repos/qraniumtest/efficient-transformers/pulls"
+              #Update GHES PR
+              EXISTING=$(curl -s -H "Authorization: token ${GHES_PAT}" "${API}?state=open&head=${GHES_OWNER}:${BRANCH}" | jq '.[0].number // empty')
+              if [ -n "$EXISTING" ]; then
+                echo "Updating GHES PR #$EXISTING}"
+                curl -s "Authorization: token ${GHES_PAT}" -H "Accept: application/vnd.github+json" \
+                  -X PATCH "${API}/${EXISTING}" \
+                  -d "{\"title\":\"[Upstream PR #{NUM}] ${TITLE}\",\"body":\"${BODY}\"} > /dev/null
+              else
+                echo "Creating GHES PR"
+                curl -s -X POST \ \
+                   -H "Authorization: token ${GHES_PAT}" -H "Accept: application/vnd.github+json" \
+                   "${API}" \
+                  -d "{\"title\":\"[Upstream PR #{PR_NUM}] ${TITLE}\",\"head\":\"${BRANCH}\",\"base\":\"main\",\"body":\"${PR_BODY}\"}" > /dev/null
+              fi
+            done
+
+        - name: Clean up GHES branches for closed upstream PRs
+          env:
+            GHES_PAT: ${{ secrets.GHES_PAT }}
+          run: |
+            set -euo pipefail
+
+            OPEN_BRANCHES=$(jq -r '.[].number | "upstream-pr-\(.)"' pr_list.json | tr '\n' ' ')
+            echo "Open upstream PR branches $OPEN_BRANCHES"
+            git ls-remote --heads https://x-access-token:${GHES_PAT}@github.qualcomm.com/${GHES_OWNER}/${GHES_REPO}.git "refs/heads/upstream-pr-*" \
+            | awk '{print $2}' | sed 's#refs/heads/##' > ghes_pr_branches.txt || true
+            while read -r BR; do
+              [ -z "$BR" ] && continue
+              if [[ " $OPEN_BRANCHES" =~ " $BR " ]]; then
+                continue
+              fi
+
+              echo "Closing/deleting stale GHES PR branch: $BR"
+
+              PR_NUM=$(curl -s -H "Authorization: token ${GHES_PAT}" "${API}?state=open&head=${GHES_OWNER}:${BR}" |jq -r'.[0].number // empty')
+              if [ -n "$PR_NUM" ]; then
+                curl -s -H "Authorization: token ${GHES_PAT}" -H "Accept: application/vnd.github+json" \
+                  -X PATCH "${API}/${PR_NUM}" \
+                  -d '{"state":"closed"}' > /dev/null
+              fi
+
+              curl -s -X DELETE \
+                -H "Authorization: token ${GHES_PAT}" -H "Accept: application/vnd.github+json" \
+                "https://github.qualcomm.com/api/v3/repos/qraniumtest/efficient-transformers/git/refs/heads/$BR" > /dev/null || true
+            done < ghes_pr_branches.txt
+                
+              
+              
+      
+            
+
+      
+
+  
