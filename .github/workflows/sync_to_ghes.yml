@@ -1,0 +1,29 @@
+name: Sync to GHES
+on:
+  push:
+    branches: [ "main" ]
+  schedule:
+    - cron: '*/10 * * * *'
+
+jobs:
+  sync_main:
+    runs_on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: 
+          fetch-depth: 0 
+
+      - name: Pull latest from original repo to fork
+        run: |
+          git remote add upstream https://github.com/quic/efficient-transformers.git
+          git fetch upstream main
+          git checkout main
+          git merge --ff-only upstream/main || git-reset --hard upstream/main
+          git push origin main
+
+      - name: Push my fork main to GHES
+        env:
+          GHES_PAT: ${{ secrets.GHES_PAT }}
+        run: |
+          git remote add ghes https://x-access-token:${GHES_PAT}@github.qualcomm.com/qraniumtest/efficient-transformers.git
+          git push ghes HEAD:main --force
