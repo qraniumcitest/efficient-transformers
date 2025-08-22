@@ -1,0 +1,44 @@
+name: Sync to GHES
+on:
+  push:
+    branches: [ "main" ]
+    tags: ["*"]
+  workflow_dispatch:
+    
+jobs:
+  push_to_ghes:
+    runs-on: ubuntu-latest
+    env:
+      GHES_BASE_URL: https://github.qualcomm.com
+      GHES_OWNER: qraniumtest
+      GHES_REPO: efficient-transformers
+    steps:
+      - name: Checkout
+      - uses: actions/checkout@v4
+        with: 
+          fetch-depth: 0 
+
+      - name: Configure git
+        run: |
+          git config user.email "sync-bot@local"
+          git config user.name "sync-bot"
+
+      - name: Add GHES remote
+        env:
+          GHES_PAT: ${{ secrets.GHES_PAT }}
+        run: |
+          git remote add ghes "${GHES_BASE_URL}/$GHES_OWNER}/${GHES_REPO}.git"
+          git remote set-url ghes "https://x-access-token:${GHES_PAT}@github.qualcomm.com/qraniumtest/efficient-transformers.git"
+
+      - name: Push branch main to GHES
+        if: github.ref_type == 'branch' && github.ref == 'refs/heads/main'
+        run: |
+          git push ghes main:main --force-with-lease
+
+      - name: Push tag to GHES
+        if: github.ref_type == 'tag'
+        env:
+          GHES_PAT: ${{ secrets.GHES_PAT }}
+        run: |
+          TAG="$GITHUB_REF#refs/tags/}"
+          git push ghes "refs/tags/${TAG}:refs/tags/${TAG}" --force
