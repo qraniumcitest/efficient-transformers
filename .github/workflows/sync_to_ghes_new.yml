@@ -9,9 +9,9 @@ jobs:
   push_to_ghes:
     runs-on: ubuntu-latest
     env:
-      GHES_BASE_URL: https://github.qualcomm.com
-      GHES_OWNER: qraniumtest
-      GHES_REPO: efficient-transformers
+      GHES_BASE_URL: "https://github.qualcomm.com"
+      GHES_OWNER: "qraniumtest"
+      GHES_REPO: "efficient-transformers"
     steps:
       - name: Checkout
       - uses: actions/checkout@v4
