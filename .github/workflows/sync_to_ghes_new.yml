@@ -27,16 +27,19 @@ jobs:
         env:
           GHES_PAT: ${{ secrets.GHES_PAT }}
         run: |
+          set -e
+          #Recreate remote to be idempotent
+          git remote remove ghes 2>/dev/null || true
           git remote add ghes "https://github.qualcomm.com/qraniumtest/efficient-transformers.git"
           git remote set-url ghes "https://x-access-token:${GHES_PAT}@github.qualcomm.com/qraniumtest/efficient-transformers.git"
 
       - name: Push branch main to GHES
-        if: github.ref_type == 'branch' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           git push ghes main:main --force-with-lease
 
       - name: Push tag to GHES
-        if: github.ref_type == 'tag'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
         env:
           GHES_PAT: ${{ secrets.GHES_PAT }}
         run: |
