@@ -27,7 +27,7 @@ jobs:
         env:
           GHES_PAT: ${{ secrets.GHES_PAT }}
         run: |
-          git remote add ghes "${GHES_BASE_URL}/$GHES_OWNER}/${GHES_REPO}.git"
+          git remote add ghes "https://github.qualcomm.com/qraniumtest/efficient-transformers.git"
           git remote set-url ghes "https://x-access-token:${GHES_PAT}@github.qualcomm.com/qraniumtest/efficient-transformers.git"
 
       - name: Push branch main to GHES
