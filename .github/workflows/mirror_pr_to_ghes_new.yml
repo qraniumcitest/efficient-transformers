@@ -14,11 +14,11 @@ jobs:
   mirror_or_close:
     runs-on: ubuntu-latest
     env:
-      GHES_BASE_URL: https://github.qualcomm.com
-      GHES_OWNER: 
-      GHES_REPO: REPO_NAME
-      FORK_OWNER: YOUR_FORK_OWNER
-      FORK_REPO: YOUR_FORK_REPO
+      GHES_BASE_URL: "https://github.qualcomm.com"
+      GHES_OWNER: "qraniumtest"
+      GHES_REPO: "efficient-transformers"
+      FORK_OWNER: "qraniumcitest"
+      FORK_REPO: "efficient-transformers"
     steps:
       - name: Ensure PR targets main and not draft
         if: github.event.action != 'closed'
@@ -38,7 +38,8 @@ jobs:
         if: github.event.action != 'closed'
         uses: actions/checkout@v4
         with:
-          ref:${{ github.event.pull_request.head.sha }}
+          #Use the PR Head SHA to mirror exactly what's under review
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
       - name: Configure git
@@ -54,42 +55,42 @@ jobs:
         run: |
           git remote add ghes "${GHES_BASE_URL}/$GHES_OWNER}/${GHES_REPO}.git"
           git remote set-url ghes "https://x-access-token:${GHES_PAT}@github.qualcomm.com/qraniumtest/efficient-transformers.git"
+          
+      - name: Push PR branch to GHES
+        if: github.event.action != 'closed'
+        id: push_branch
+        run: |
+          set -euo pipefail
+          PR_NUM="${{ github.event.pull_request.number }}"
+          BRANCH="fork-pr-${PR_NUM}"
+          git push ghes "HEADS:${BRANCH}" --force
+          echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
+          
+      - name: Create/Update GHES PR
+        if: github.event.action != 'closed'
+        env:
+          GHES_PAT: ${{ secrets.GHES_PAT }}
+        run: |
+          set -euo pipefail
+          PR_NUM="${{ github.event.pull_request.number }}"
+          BRANCH="${{ steps.push_branch.outputs.branch }}"
+          TITLE="${{ github.event.pull_request.title }}"
+          URL=$(echo "$pr" | jq -r .body)
+          HEAD_SHA="${{ github.event.pull_request.head_sha }}"
+          BODY_RAW="${{ github.event.pull_request.body }}"
+          URL="${{ github.event.pull_request.html_url }}"
+          BODY_ESCAPED="$(echo "$BODY_RAW" | tr '\n''' | tr '\r''')"
 
-        - name: Push PR branch to GHES
-          if: github.event.action != 'closed'
-          id: push_branch
-          run: |
-            set -euo pipefail
-            PR_NUM="${{ github.event.pull_request.number }}"
-            BRANCH="fork-pr-${PR_NUM}"
-            git push ghes "HEADS:${BRANCH}" --force
-            echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
-
-         - name: Create/Update GHES PR
-           if: github.event.action != 'closed'
-           env:
-             GHES_PAT: ${{ secrets.GHES_PAT }}
-           run: |
-            set -euo pipefail
-            PR_NUM="${{ github.event.pull_request.number }}"
-            BRANCH="${{ steps.push_branch.outputs.branch }}"
-            TITLE="${{ github.event.pull_request.title }}"
-            URL=$(echo "$pr" | jq -r .body)
-            HEAD_SHA="${{ github.event.pull_request.head_sha }}"
-            BODY_RAW="${{ github.event.pull_request.body }}"
-            URL="${{ github.event.pull_request.html_url }}"
-            BODY_ESCAPED="$(echo "$BODY_RAW" | tr '\n''' | tr '\r''')"
-
-            META=$(cat <<EOF
-              [Mirror Metadat]
-              Original-PR-Repo: ${{ env.FORK_OWNER }}/$${{ env.FORK_REPO }}
-              Original-PR-Number: ${PR_NUM}
-              Original-PR-URL: ${URL}
-              Original-Head-SHA: ${HEAD_SHA}
-              EOF
-              )
-              PR_BODY="Mirrored from ${URL}
-            ${META}
+          META=$(
+          cat <<EOF
+          [Mirror Metadat]
+          Original-PR-Repo: ${{ env.FORK_OWNER }}/$${{ env.FORK_REPO }}
+          Original-PR-Number: ${PR_NUM}
+          Original-PR-URL: ${URL}
+          Original-Head-SHA: ${HEAD_SHA}
+          EOF)
+            PR_BODY="Mirrored from ${URL}
+          ${META}
             ---
             ${BODY_ESCAPED}"
             API="https://github.qualcomm.com/api/v3/repos/qraniumtest/efficient-transformers/pulls"
@@ -108,7 +109,7 @@ jobs:
                   -d "$(jq -n --arg t "Fork PR #$PR_NUM}] ${TITLE}" --arg h "${BRANCH}" --arg b "$PR_BODY" '{title:$t,head:$h, base"main", body:$b}')"\"}" > /dev/null
             fi
 
-     - name: Clean up GHES branches for closed upstream PRs
+     - name: Close up GHES branches for closed upstream PRs
        if: github.event.action == 'closed'
         env:
           GHES_PAT: ${{ secrets.GHES_PAT }}
