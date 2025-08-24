@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 #
 # -----------------------------------------------------------------------------
+dummy
 
 # Configuration file for the Sphinx documentation builder.
 #
