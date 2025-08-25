@@ -2,7 +2,7 @@
 
 
 ---
-# Efficient Transformers Library .
+# Efficient Transformers Library 
 ---
 
 *Latest news* :fire: <br>
