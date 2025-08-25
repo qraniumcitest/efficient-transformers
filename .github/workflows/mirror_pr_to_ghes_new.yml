@@ -15,13 +15,23 @@ jobs:
   mirror_or_close:
     runs-on: ubuntu-latest
     env:
-      GHES_BASE_URL: "https://github.qualcomm.com"
-      GHES_OWNER: "qraniumtest"
-      GHES_REPO: "efficient-transformers"
+      GHES_BASE_URL: https://github.qualcomm.com
+      GHES_OWNER: qraniumtest
+      GHES_REPO: efficient-transformers
       FORK_OWNER: "qraniumcitest"
       FORK_REPO: "efficient-transformers"
-
     steps:
+      - name: Preflight -verify GHES env and connectivity
+        run: | 
+          set -e
+          echo "GHES_BASE_URL=${GHES_BASE_URL}"
+          echo "GHES_OWNER=${GHES_OWNER}"
+          echo "GHES_REPO=${GHES_REPO}"
+          #DNS check
+          nslookup github.qualcomm.com || (echo "DNS lookup Failed. Connect VPN then re-run"; exit 1)
+          #Http Reachability
+          curl -I --max-time 10 "https://github.qualcomm.com" ||  (echo "Cannot reach GHES over HTTPS. Connect VPN then re-reun"; exit 1)
+          
       - name: Ensure PR targets main and not draft
         if: github.event.action != 'closed'
         run: |
