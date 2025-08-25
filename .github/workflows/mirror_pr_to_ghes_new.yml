@@ -54,12 +54,6 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
-      - name: Install jq
-        if: github.event.action != 'closed'
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y jq
-
       - name: Configure git
         if: github.event.action != 'closed'
         run: |
