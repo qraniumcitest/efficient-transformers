@@ -7,7 +7,7 @@
 
 import pytest
 from transformers import AutoConfig, AutoModelForCausalLM
-
+#import nmpy 
 from QEfficient.transformers.models.modeling_auto import QEFFAutoModelForCausalLM
 # dummy
 # Simple test config for memory reduction testing
