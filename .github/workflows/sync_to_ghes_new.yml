@@ -8,6 +8,9 @@ on:
 jobs:
   push_to_ghes:
     runs-on: self-hosted
+    defaults:
+      run:
+        shell: bash
     env:
       GHES_BASE_URL: "https://github.qualcomm.com"
       GHES_OWNER: "qraniumtest"
