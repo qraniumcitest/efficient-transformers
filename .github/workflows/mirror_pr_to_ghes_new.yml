@@ -35,6 +35,7 @@ jobs:
           if [ "$DRAFT" = "true" ]; then
             echo "PR is draft. Skipping."
             exit 78
+          fi
 
       - name: Checkout PR head
         if: github.event.action != 'closed'
@@ -42,6 +43,12 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
+
+      - name: Install jq
+        if: github.event.action != 'closed'
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y jq
 
       - name: Configure git
         if: github.event.action != 'closed'
@@ -52,10 +59,13 @@ jobs:
       - name: Add GHES remote
         if: github.event.action != 'closed'
         env:
+          GHES_USER: ${{ secrets.GHES_USER}}
           GHES_PAT: ${{ secrets.GHES_PAT }}
         run: |
-          git remote add ghes "${GHES_BASE_URL}/${GHES_OWNER}/${GHES_REPO}.git"
-          git remote set-url ghes "https://x-access-token:${GHES_PAT}@github.qualcomm.com/${GHES_OWNER}/${GHES_REPO}.git"
+          set -e
+          git remote add ghes "${GHES_BASE_URL}/${GHES_OWNER}/${GHES_REPO}.git" || true
+          git remote set-url ghes "https://${GHES_USER}:${GHES_PAT}@github.qualcomm.com/${GHES_OWNER}/${GHES_REPO}.git"
+          git ls-remote ghes --heads
 
       - name: Push PR branch to GHES
         if: github.event.action != 'closed'
@@ -87,10 +97,12 @@ jobs:
             "Original-PR-Number: ${PR_NUM}" \
             "Original-PR-URL: ${URL}" \
             "Original-Head-SHA: ${HEAD_SHA}")
+
           PR_BODY=$(printf '%s\n\n%s\n\n%s\n' \
             "$URL" \
             "$META" \
             "$BODY_ESCAPED")
+
           API="${{ env.GHES_BASE_URL }}/api/v3/repos/${{ env.GHES_OWNER }}/${{ env.GHES_REPO }}/pulls"
           EXISTING=$(curl -s -H "Authorization: token ${GHES_PAT}" "${API}?state=open&head=${GHES_OWNER}:${BRANCH}" | jq '.[0].number // empty')
           if [ -n "$EXISTING" ]; then
@@ -104,6 +116,7 @@ jobs:
               -H "Authorization: token ${GHES_PAT}" -H "Accept: application/vnd.github+json" \
               "${API}" \
               -d "$(jq -n --arg t "[Fork PR #${PR_NUM}] ${TITLE}" --arg h "${BRANCH}" --arg b "$PR_BODY" --arg base "main" '{title:$t, head:$h, base:$base, body:$b}')" > /dev/null
+          fi
 
       - name: Close up GHES branches for closed upstream PRs
         if: github.event.action == 'closed'
