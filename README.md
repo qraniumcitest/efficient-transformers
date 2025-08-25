@@ -5,7 +5,7 @@
 # Efficient Transformers Library 
 ---
 
-*Latest news* :fire: <br>
+*Latest news  * :fire: <br>
 
 - [06/2025] Added support for Llama4 Multi-Model [meta-llama/Llama-4-Scout-17B-16E-Instruct](https://huggingface.co/meta-llama/Llama-4-Scout-17B-16E-Instruct)
 - [06/2025] Added support for Gemma3 Multi-Modal-Model [google/gemma-3-4b-it](https://huggingface.co/google/gemma-3-4b-it)
