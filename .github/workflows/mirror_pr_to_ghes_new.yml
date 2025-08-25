@@ -114,7 +114,7 @@ jobs:
             "$BODY_ESCAPED")
 
           API="${{ env.GHES_BASE_URL }}/api/v3/repos/${{ env.GHES_OWNER }}/${{ env.GHES_REPO }}/pulls"
-          EXISTING=$(curl -s -H "Authorization: token ${GHES_PAT}" "${API}?state=open&head=${GHES_OWNER}:${BRANCH}" | jq '.[0].number // empty')
+          EXISTING=$(curl -s -H "Authorization: token ${GHES_PAT}" "${API}?state=open&head=${GHES_OWNER}:${BRANCH}" | jq -r '.[0].number // empty')
           if [ -n "$EXISTING" ]; then
             echo "Updating GHES PR #${EXISTING}"
             curl -s -H "Authorization: token ${GHES_PAT}" -H "Accept: application/vnd.github+json" \
