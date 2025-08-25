@@ -18,11 +18,6 @@ jobs:
         with: 
           fetch-depth: 0 
 
-      - name: Configure git
-        run: |
-          git config user.email "sync-bot@local"
-          git config user.name "sync-bot"
-
       - name: Check GHES reachability
         run: |
           set -e
@@ -33,24 +28,10 @@ jobs:
           GHES_USER: ${{ secrets.GHES_USER }}
           GHES_PAT: ${{ secrets.GHES_PAT }}
         run: |
-          set -e
+          set -eu pipefail
+          git remote remove ghes 2>//dev/null || true
           #Recreate remote to be idempotent
           git remote add ghes "https://github.qualcomm.com/qraniumtest/efficient-transformers.git" || true
           git remote set-url ghes "https://${GHES_USER}:${GHES_PAT}@github.qualcomm.com/qraniumtest/efficient-transformers.git"
           git ls-remote ghes --heads
-          
-      - name: Push branch main to GHES
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          git fetch ghes main
-          git rebase ghes/main
-          # Resolve any conflicts if prompted
-          git push ghes main:main --force-with-lease
-
-      - name: Push tag to GHES
-        if: github.ref_type == 'tag'
-        env:
-          GHES_PAT: ${{ secrets.GHES_PAT }}
-        run: |
-          TAG="${GITHUB_REF#refs/tags/}"
-          git push ghes "refs/tags/${TAG}:refs/tags/${TAG}" --force
+          echo "connectivity ok"
