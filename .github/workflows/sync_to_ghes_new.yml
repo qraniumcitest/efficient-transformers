@@ -7,7 +7,7 @@ on:
     
 jobs:
   push_to_ghes:
-    runs-on: self-hosted
+    runs-on: [self-hosted, linux, x64]
     defaults:
       run:
         shell: '"C:\Program Files\Git\bin\bash.exe" -lc {0}'
