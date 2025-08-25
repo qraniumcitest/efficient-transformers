@@ -4,9 +4,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 #
 # -----------------------------------------------------------------------------
-
 import pytest
-
 import QEfficient
 from QEfficient.cloud.infer import main as infer
 
