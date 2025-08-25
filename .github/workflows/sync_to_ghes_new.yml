@@ -42,6 +42,9 @@ jobs:
       - name: Push branch main to GHES
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
+          git fetch ghes main
+          git rebase ghes/main
+          # Resolve any conflicts if prompted
           git push ghes main:main --force-with-lease
 
       - name: Push tag to GHES
