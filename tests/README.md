@@ -6,7 +6,7 @@ This directory contains the tests for the project. Below is the list of test fun
 - test_infer function
 
 ### cloud/test_export.py
-- test_export function
+- test_export function 
 
 ### cloud/test_compile.py
 - test_compile function
@@ -73,3 +73,4 @@ Then run the tests with html:
 ```sh
 pytest --html=report.html
 ```
+
