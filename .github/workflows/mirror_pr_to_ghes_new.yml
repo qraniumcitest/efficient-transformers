@@ -16,9 +16,9 @@ jobs:
     runs-on: [self-hosted, linux, x64]
     env:
       GHES_BASE_URL: https://github.qualcomm.com
-      GHES_OWNER: qraniumtest
+      GHES_OWNER: qranium
       GHES_REPO: efficient-transformers
-      FORK_OWNER: "qraniumcitest"
+      FORK_OWNER: "qranium"
       FORK_REPO: "efficient-transformers"
     steps:
       - name: Preflight -verify GHES env and connectivity
