@@ -1,7 +1,7 @@
 # Use Ubuntu 20.04 as the base image
 # Create a temp image that has build tools that we can use to build wheel
 # files for dependencies only available as source.
-FROM docker-registry.qualcomm.com/library/ubuntu:20.04
+FROM docker-registry.qualcomm.com/library/ubuntu:22.04
 
 # Update the package lists and install required packages
 RUN apt-get update && apt-get install -y \
