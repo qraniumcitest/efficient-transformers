@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y \
     tmux \
     python3.10 \
     python3.10-venv \
-    python3-pip
+    python3-pip 
 
 # pip recognizes this variable
 ENV PIP_CACHE_DIR=/var/cache/pip
