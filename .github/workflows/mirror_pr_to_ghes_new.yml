@@ -125,17 +125,43 @@ jobs:
       - name: Close up GHES branches for closed upstream PRs
         if: github.event.action == 'closed'
         env:
+          GHES_BASE_URL: https://github.qualcomm.com
+          GHES_OWNER: qranium
+          GHES_REPO: efficient-transformers
           GHES_PAT: ${{ secrets.GHES_PAT }}
         run: |
           set -euo pipefail
           PR_NUM="${{ github.event.pull_request.number }}"
           BRANCH="fork-pr-${PR_NUM}"
-          PR_ID=$(curl -s -H "Authorization: token ${GHES_PAT}" "${{ env.GHES_BASE_URL }}/api/v3/repos/${{ env.GHES_OWNER }}/${{ env.GHES_REPO }}/pulls?state=open&head=${GHES_OWNER}:${BRANCH}" | jq '.[0].number // empty')
-          if [ -n "$PR_ID" ]; then
-            curl -s -H "Authorization: token ${GHES_PAT}" -H "Accept: application/vnd.github+json" \
-              -X PATCH "${{ env.GHES_BASE_URL }}/api/v3/repos/${{ env.GHES_OWNER }}/${{ env.GHES_REPO }}/pulls/${PR_ID}" \
-              -d '{"state":"closed"}' > /dev/null
+          API="${GHES_BASE_URL}/api/v3/repos/${GHES_OWNER}/${GHES_REPO}"
+          echo "Looking for open GHES PR with head=${GHES_OWNER}:${BRANCH}"
+          # Fetch and capture HTTP code safely
+          RESP="$(curl -sS -H "Authorization: token ${GHES_PAT}" \
+                    -H "Accept: application/vnd.github+json" \
+                    "${API}/pulls?state=open&head=${GHES_OWNER}:${BRANCH}" \
+                    -w "\n%{http_code}")"
+          HTTP_CODE="$(printf '%s\n' "$RESP" | tail -n1)"
+          JSON="$(printf '%s\n' "$RESP" | sed '$d')"
+          echo "HTTP_CODE=${HTTP_CODE}"
+          if [ "${HTTP_CODE}" != "200" ]; then
+            echo "Non-200 from GHES pulls query; payload below (skip gracefully):"
+            echo "$JSON"
+            exit 78
           fi
-          curl -s -X DELETE \
-            -H "Authorization: token ${GHES_PAT}" -H "Accept: application/vnd.github+json" \
-            "${{ env.GHES_BASE_URL }}/api/v3/repos/${{ env.GHES_OWNER }}/${{ env.GHES_REPO }}/git/refs/heads/${BRANCH}" > /dev/null || true
+          # Extract PR number only if the payload is an array
+          PR_ID="$(printf '%s' "$JSON" | jq -r 'if type=="array" and length>0 then .[0].number else empty end')"
+          if [ -n "$PR_ID" ]; then
+            echo "Closing GHES PR #$PR_ID"
+            curl -sS -X PATCH \
+              -H "Authorization: token ${GHES_PAT}" \
+              -H "Accept: application/vnd.github+json" \
+              "${API}/pulls/${PR_ID}" \
+              -d '{"state":"closed"}' > /dev/null || true
+          else
+            echo "No open GHES PR found for head=${GHES_OWNER}:${BRANCH} (nothing to close)."
+          fi
+          echo "Deleting branch ${BRANCH} on GHES (idempotent)"
+          curl -sS -X DELETE \
+            -H "Authorization: token ${GHES_PAT}" \
+            -H "Accept: application/vnd.github+json" \
+            "${API}/git/refs/heads/${BRANCH}" > /dev/null || true
