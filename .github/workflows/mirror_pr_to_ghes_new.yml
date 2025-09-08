@@ -140,6 +140,10 @@ jobs:
                     -H "Accept: application/vnd.github+json" \
                     "${API}/pulls?state=open&head=${GHES_OWNER}:${BRANCH}" \
                     -w "\n%{http_code}")"
+          echo "Token length: ${#GHES_PAT}"
+            curl -sS -o /dev/null -w "USER_HTTP:%{http_code}\n" \
+             -H "Authorization: token ${GHES_PAT}" \
+             "https://github.qualcomm.com/api/v3/user"
           HTTP_CODE="$(printf '%s\n' "$RESP" | tail -n1)"
           JSON="$(printf '%s\n' "$RESP" | sed '$d')"
           echo "HTTP_CODE=${HTTP_CODE}"
