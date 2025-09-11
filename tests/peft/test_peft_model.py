@@ -118,6 +118,7 @@ def test_auto_peft_model_for_causal_lm_hash():
     hash_0_1_1 = qeff_model_0.model_hash
     assert hash_0_1_0 == hash_0_1_1
     assert hash_0_0_0 != hash_0_1_0
+    
 
     base_model_1, lora_model_1 = create_peft_model(base_config_1, adapter_config_0, "adapter_0")
     lora_model_1.add_adapter("adapter_1", adapter_config_1)
