@@ -11,6 +11,7 @@ from peft import PeftModelForCausalLM, PeftType
 class QEffPeftModelForCausalLM(PeftModelForCausalLM):
     def forward(
         self,
+        input=None,
         input_ids=None,
         attention_mask=None,
         position_ids=None,
