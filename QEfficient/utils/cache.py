@@ -7,6 +7,7 @@
 
 import os
 from pathlib import Path
+import matplotlib
 
 QEFF_HOME: Path = None
 if "QEFF_HOME" in os.environ:
