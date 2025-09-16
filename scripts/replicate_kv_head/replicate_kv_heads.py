@@ -7,7 +7,7 @@
 
 import argparse
 from typing import Optional
-
+import nump
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
