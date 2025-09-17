@@ -42,10 +42,10 @@ jobs:
             echo "PR base is not main. Skipping"
             exit 78
           fi
-          if [ "$DRAFT" = "true" ]; then
-            echo "PR is draft. Skipping."
-            exit 78
-          fi
+          # if [ "$DRAFT" = "true" ]; then
+          #   echo "PR is draft. Skipping."
+          #   exit 78
+          # fi
 
       - name: Checkout PR head
         if: github.event.action != 'closed'
