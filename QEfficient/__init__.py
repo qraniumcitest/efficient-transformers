@@ -7,7 +7,7 @@
 
 import os
 import warnings
-
+import nump
 from QEfficient.utils import custom_format_warning
 
 # For faster downloads via hf_transfer
