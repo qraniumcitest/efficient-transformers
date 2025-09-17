@@ -6,7 +6,7 @@
 # -----------------------------------------------------------------------------
 
 import hashlib
-import json
+import jso
 import os
 import shutil
 from typing import Dict, List, Optional
