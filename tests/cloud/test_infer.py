@@ -6,7 +6,7 @@
 # -----------------------------------------------------------------------------
 
 import pytest
-
+import numpy
 import QEfficient
 from QEfficient.cloud.infer import main as infer
 
