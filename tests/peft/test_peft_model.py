@@ -7,6 +7,7 @@
 
 import os
 from time import perf_counter
+import
 
 import numpy as np
 import onnx
