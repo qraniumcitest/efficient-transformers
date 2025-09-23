@@ -125,23 +125,22 @@ jobs:
           fi
 
       - name: Post comment to GHES PR
-        if: github.event.action != 'closed'
+        if: github.event_name == 'issue_comment' && github.event.issue.pull_request != null
         env:
           GHES_PAT: ${{ secrets.GHES_PAT }}
         run: |
           set -euo pipefail
-          PR_NUM="${{ github.event.pull_request.number }}"
+          PR_NUM="${{ github.event.issue.number }}"
           BRANCH="fork-pr-${PR_NUM}"
           API="${{ env.GHES_BASE_URL }}/api/v3/repos/${{ env.GHES_OWNER }}/${{ env.GHES_REPO }}"
-          # Find the mirrored PR number on GHES
           GHES_PR_NUM=$(curl -s -H "Authorization: token ${GHES_PAT}" "${API}/pulls?state=open&head=${GHES_OWNER}:${BRANCH}" | jq -r '.[0].number // empty')
           if [ -n "$GHES_PR_NUM" ]; then
-            COMMENT_BODY="Mirrored from upstream PR #${PR_NUM}"
+            COMMENT_BODY="${{ github.event.comment.body }}"
             curl -s -X POST \
-              -H "Authorization: token ${GHES_PAT}" \
-              -H "Accept: application/vnd.github+json" \
-              "${API}/issues/${GHES_PR_NUM}/comments" \
-              -d "$(jq -n --arg body "$COMMENT_BODY" '{body:$body}')"
+            -H "Authorization: token ${GHES_PAT}" \
+            -H "Accept: application/vnd.github+json" \
+            "${API}/issues/${GHES_PR_NUM}/comments" \
+            -d "$(jq -n --arg body "$COMMENT_BODY" '{body:$body}')"
           else
             echo "No open GHES PR found to comment on."
           fi
