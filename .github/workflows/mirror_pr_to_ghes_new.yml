@@ -40,10 +40,10 @@ jobs:
           set -e
           BASE="${{ github.event.pull_request.base.ref }}"
           DRAFT="${{ github.event.pull_request.draft }}"
-          if [ "$BASE" != "main" ]; then
-            echo "PR base is not main. Skipping"
-            exit 78
-          fi
+          # if [ "$BASE" != "main" ]; then
+          #   echo "PR base is not main. Skipping"
+          #   exit 78
+          # fi
           # if [ "$DRAFT" = "true" ]; then
           #   echo "PR is draft. Skipping."
           #   exit 78
