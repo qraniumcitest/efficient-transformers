@@ -5,6 +5,8 @@ on:
   pull_request:
     types: [opened, reopened, synchronize, edited, ready_for_review, closed]
     branches: ["main"]
+  issue_comment:
+    types: [created]
   workflow_dispatch:
 
 concurrency:
