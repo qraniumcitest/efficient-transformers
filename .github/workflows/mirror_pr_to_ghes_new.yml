@@ -122,6 +122,28 @@ jobs:
               -d "$(jq -n --arg t "[Fork PR #${PR_NUM}] ${TITLE}" --arg h "${BRANCH}" --arg b "$PR_BODY" --arg base "main" '{title:$t, head:$h, base:$base, body:$b}')" > /dev/null
           fi
 
+      - name: Post comment to GHES PR
+        if: github.event.action != 'closed'
+        env:
+          GHES_PAT: ${{ secrets.GHES_PAT }}
+        run: |
+          set -euo pipefail
+          PR_NUM="${{ github.event.pull_request.number }}"
+          BRANCH="fork-pr-${PR_NUM}"
+          API="${{ env.GHES_BASE_URL }}/api/v3/repos/${{ env.GHES_OWNER }}/${{ env.GHES_REPO }}"
+          # Find the mirrored PR number on GHES
+          GHES_PR_NUM=$(curl -s -H "Authorization: token ${GHES_PAT}" "${API}/pulls?state=open&head=${GHES_OWNER}:${BRANCH}" | jq -r '.[0].number // empty')
+          if [ -n "$GHES_PR_NUM" ]; then
+            COMMENT_BODY="Mirrored from upstream PR #${PR_NUM}"
+            curl -s -X POST \
+              -H "Authorization: token ${GHES_PAT}" \
+              -H "Accept: application/vnd.github+json" \
+              "${API}/issues/${GHES_PR_NUM}/comments" \
+              -d "$(jq -n --arg body "$COMMENT_BODY" '{body:$body}')"
+          else
+            echo "No open GHES PR found to comment on."
+          fi
+
       - name: Close up GHES branches for closed upstream PRs
         if: github.event.action == 'closed'
         env:
