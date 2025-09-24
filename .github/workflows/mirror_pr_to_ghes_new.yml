@@ -3,7 +3,7 @@ name: Mirror Fork PRs to GHES
 
 on:
   pull_request:
-    types: [opened, reopened, synchronize, edited, ready_for_review, closed, labeled]
+    types: [opened, reopened, synchronize, edited, ready_for_review, closed, labeled, unlabeled]
     branches: ["main"]
   issue_comment:
     types: [created]
@@ -125,8 +125,8 @@ jobs:
           fi
 
       
-      - name: Add "Jenkins-Ready" label to mirrored GHES PR
-        if: github.event.action == 'labeled' && contains(fromJson('["Jenkins-Ready"]'), github.event.label.name)
+      - name: Sync "Jenkins-Ready" label to mirrored GHES PR
+        if: (github.event.action == 'labeled' || github.event.action == 'unlabeled') && contains(fromJson('["Jenkins-Ready"]'), github.event.label.name)
         env:
           GHES_PAT: ${{ secrets.GHES_PAT }}
         run: |
@@ -135,15 +135,29 @@ jobs:
           BRANCH="fork-pr-${PR_NUM}"
           API="${{ env.GHES_BASE_URL }}/api/v3/repos/${{ env.GHES_OWNER }}/${{ env.GHES_REPO }}"
           GHES_PR_NUM=$(curl -s -H "Authorization: token ${GHES_PAT}" "${API}/pulls?state=open&head=${GHES_OWNER}:${BRANCH}" | jq -r '.[0].number // empty')
-          if [ -n "$GHES_PR_NUM" ]; then
-          LABELS_API="${API}/issues/${GHES_PR_NUM}/labels"
-          curl -s -X POST \
-            -H "Authorization: token ${GHES_PAT}" \
-            -H "Accept: application/vnd.github+json" \
-            "${LABELS_API}" \
-            -d '["Jenkins-Ready"]'
+          if [ -z "$GHES_PR_NUM" ]; then
+            echo "No open GHES PR found to sync label."
+            exit 0
+          fi
+
+          LABEL_NAME="Jenkins-Ready"
+          if [ "${{ github.event.action }}" = "labeled" ] && [ "${{ github.event.label.name }}" = "${LABEL_NAME}" ]; then
+            echo "Adding label '${LABEL_NAME}' to mirrored GHES PR #${GHES_PR_NUM}"
+            LABELS_API="${API}/issues/${GHES_PR_NUM}/labels"
+            curl -s -X POST \
+              -H "Authorization: token ${GHES_PAT}" \
+              -H "Accept: application/vnd.github+json" \
+              "${LABELS_API}" \
+              -d "[\"${LABEL_NAME}\"]"
+          elif [ "${{ github.event.action }}" = "unlabeled" ] && [ "${{ github.event.label.name }}" = "${LABEL_NAME}" ]; then
+            echo "Removing label '${LABEL_NAME}' from mirrored GHES PR #${GHES_PR_NUM}"
+            LABELS_API="${API}/issues/${GHES_PR_NUM}/labels/${LABEL_NAME}"
+            curl -s -X DELETE \
+              -H "Authorization: token ${GHES_PAT}" \
+              -H "Accept: application/vnd.github+json" \
+              "${LABELS_API}"
           else
-            echo "No open GHES PR found to label."
+            echo "No action needed for label '${LABEL_NAME}'."
           fi
 
       - name: Close up GHES branches for closed upstream PRs
