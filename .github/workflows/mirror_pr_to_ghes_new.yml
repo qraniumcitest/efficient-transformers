@@ -125,7 +125,7 @@ jobs:
           fi
 
       
-      - name: Mirror when "Jenkins-Ready" label is added
+      - name: Add "Jenkins-Ready" label to mirrored GHES PR
         if: github.event.action == 'labeled' && contains(fromJson('["Jenkins-Ready"]'), github.event.label.name)
         env:
           GHES_PAT: ${{ secrets.GHES_PAT }}
@@ -136,14 +136,14 @@ jobs:
           API="${{ env.GHES_BASE_URL }}/api/v3/repos/${{ env.GHES_OWNER }}/${{ env.GHES_REPO }}"
           GHES_PR_NUM=$(curl -s -H "Authorization: token ${GHES_PAT}" "${API}/pulls?state=open&head=${GHES_OWNER}:${BRANCH}" | jq -r '.[0].number // empty')
           if [ -n "$GHES_PR_NUM" ]; then
-            COMMENT_BODY="Jenkins-Ready"
-            curl -s -X POST \
-              -H "Authorization: token ${GHES_PAT}" \
-              -H "Accept: application/vnd.github+json" \
-              "${API}/issues/${GHES_PR_NUM}/comments" \
-              -d "$(jq -n --arg body "$COMMENT_BODY" '{body:$body}')"
+          LABELS_API="${API}/issues/${GHES_PR_NUM}/labels"
+          curl -s -X POST \
+            -H "Authorization: token ${GHES_PAT}" \
+            -H "Accept: application/vnd.github+json" \
+            "${LABELS_API}" \
+            -d '["Jenkins-Ready"]'
           else
-            echo "No open GHES PR found to comment on."
+            echo "No open GHES PR found to label."
           fi
 
       - name: Close up GHES branches for closed upstream PRs
