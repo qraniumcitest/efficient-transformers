@@ -6,7 +6,7 @@
 # -----------------------------------------------------------------------------
 
 import random
-
+import nump
 import pytest
 from vllm import LLM, SamplingParams
 
