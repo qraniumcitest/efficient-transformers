@@ -3,7 +3,7 @@ name: Mirror Fork PRs to GHES
 
 on:
   pull_request:
-    types: [opened, reopened, synchronize, edited, ready_for_review, closed, labeled, unlabeled]
+    types: [opened, reopened, synchronize, edited, ready_for_review, closed]
     branches: ["main"]
   issue_comment:
     types: [created]
