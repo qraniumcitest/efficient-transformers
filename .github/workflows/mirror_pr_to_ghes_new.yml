@@ -125,40 +125,57 @@ jobs:
           fi
 
       
-      - name: Sync "Jenkins-Ready" label to mirrored GHES PR
-        if: (github.event.action == 'labeled' || github.event.action == 'unlabeled') && contains(fromJson('["Jenkins-Ready"]'), github.event.label.name)
-        env:
-          GHES_PAT: ${{ secrets.GHES_PAT }}
-        run: |
-          set -euo pipefail
-          PR_NUM="${{ github.event.pull_request.number }}"
-          BRANCH="fork-pr-${PR_NUM}"
-          API="${{ env.GHES_BASE_URL }}/api/v3/repos/${{ env.GHES_OWNER }}/${{ env.GHES_REPO }}"
-          GHES_PR_NUM=$(curl -s -H "Authorization: token ${GHES_PAT}" "${API}/pulls?state=open&head=${GHES_OWNER}:${BRANCH}" | jq -r '.[0].number // empty')
-          if [ -z "$GHES_PR_NUM" ]; then
-            echo "No open GHES PR found to sync label."
-            exit 0
-          fi
+      - name: Sync "Jenkins-Ready" label to mirrored GHES PR (with access check)
+		if: (github.event.action == 'labeled' || github.event.action == 'unlabeled') && contains(fromJson('["Jenkins-Ready"]'), github.event.label.name)
+		env:
+			GHES_PAT: ${{ secrets.GHES_PAT }}
+			ACCESS_LIST: ${{ secrets.ACCESS_LIST }}   # <-- Access list from secrets
+		run: |
+			set -euo pipefail
+			ACTOR="${{ github.actor }}"
+			is_authorized=false
+			IFS=',' read -ra USERS <<< "$ACCESS_LIST"
+			for user in "${USERS[@]}"; do
+				if [[ "$ACTOR" == "$user" ]]; then
+					is_authorized=true
+					break
+				fi
+			done
 
-          LABEL_NAME="Jenkins-Ready"
-          if [ "${{ github.event.action }}" = "labeled" ] && [ "${{ github.event.label.name }}" = "${LABEL_NAME}" ]; then
-            echo "Adding label '${LABEL_NAME}' to mirrored GHES PR #${GHES_PR_NUM}"
-            LABELS_API="${API}/issues/${GHES_PR_NUM}/labels"
-            curl -s -X POST \
-              -H "Authorization: token ${GHES_PAT}" \
-              -H "Accept: application/vnd.github+json" \
-              "${LABELS_API}" \
-              -d "[\"${LABEL_NAME}\"]"
-          elif [ "${{ github.event.action }}" = "unlabeled" ] && [ "${{ github.event.label.name }}" = "${LABEL_NAME}" ]; then
-            echo "Removing label '${LABEL_NAME}' from mirrored GHES PR #${GHES_PR_NUM}"
-            LABELS_API="${API}/issues/${GHES_PR_NUM}/labels/${LABEL_NAME}"
-            curl -s -X DELETE \
-              -H "Authorization: token ${GHES_PAT}" \
-              -H "Accept: application/vnd.github+json" \
-              "${LABELS_API}"
-          else
-            echo "No action needed for label '${LABEL_NAME}'."
-          fi
+			if [ "$is_authorized" = true ]; then
+				echo "Actor $ACTOR is authorized. Syncing label..."
+				# Place your existing label sync logic here
+				PR_NUM="${{ github.event.pull_request.number }}"
+				BRANCH="fork-pr-${PR_NUM}"
+				API="${{ env.GHES_BASE_URL }}/api/v3/repos/${{ env.GHES_OWNER }}/${{ env.GHES_REPO }}"
+				GHES_PR_NUM=$(curl -s -H "Authorization: token ${GHES_PAT}" "${API}/pulls?state=open&head=${GHES_OWNER}:${BRANCH}" | jq -r '.[0].number // empty')
+				if [ -z "$GHES_PR_NUM" ]; then
+					echo "No open GHES PR found to sync label."
+					exit 0
+				fi
+
+				LABEL_NAME="Jenkins-Ready"
+				if [ "${{ github.event.action }}" = "labeled" ] && [ "${{ github.event.label.name }}" = "${LABEL_NAME}" ]; then
+					echo "Adding label '${LABEL_NAME}' to mirrored GHES PR #${GHES_PR_NUM}"
+					LABELS_API="${API}/issues/${GHES_PR_NUM}/labels"
+					curl -s -X POST \
+					-H "Authorization: token ${GHES_PAT}" \
+					-H "Accept: application/vnd.github+json" \
+					"${LABELS_API}" \
+					-d "[\"${LABEL_NAME}\"]"
+				elif [ "${{ github.event.action }}" = "unlabeled" ] && [ "${{ github.event.label.name }}" = "${LABEL_NAME}" ]; then
+					echo "Removing label '${LABEL_NAME}' from mirrored GHES PR #${GHES_PR_NUM}"
+					LABELS_API="${API}/issues/${GHES_PR_NUM}/labels/${LABEL_NAME}"
+					curl -s -X DELETE \
+					-H "Authorization: token ${GHES_PAT}" \
+					-H "Accept: application/vnd.github+json" \
+					"${LABELS_API}"
+				else
+					echo "No action needed for label '${LABEL_NAME}'."
+				fi
+			else
+				echo "Actor $ACTOR is NOT in access list. Skipping label sync."
+			fi
 
       - name: Close up GHES branches for closed upstream PRs
         if: github.event.action == 'closed'
