@@ -125,50 +125,50 @@ jobs:
 
       
       - name: Mirror "Jenkins-Ready" comment to GHES PR if authorized
-		if: github.event_name == 'issue_comment' && github.event.comment.body == 'Jenkins-Ready'
-		env:
-			GHES_PAT: ${{ secrets.GHES_PAT }}
-			ACCESS_LIST: ${{ secrets.ACCESS_LIST }}
-			GHES_BASE_URL: https://github.qualcomm.com
-			GHES_OWNER: qranium
-			GHES_REPO: efficient-transformers
-		run: |
-			set -euo pipefail
-			ACTOR="${{ github.actor }}"
-			is_authorized=false
-			IFS=',' read -ra USERS <<< "$ACCESS_LIST"
-			for user in "${USERS[@]}"; do
-			if [[ "$ACTOR" == "$user" ]]; then
-				is_authorized=true
-				break
-			fi
-			done
+        if: github.event_name == 'issue_comment' && github.event.comment.body == 'Jenkins-Ready'
+        env:
+          GHES_PAT: ${{ secrets.GHES_PAT }}
+          ACCESS_LIST: ${{ secrets.ACCESS_LIST }}
+          GHES_BASE_URL: https://github.qualcomm.com
+          GHES_OWNER: qranium
+          GHES_REPO: efficient-transformers
+        run: |
+          set -euo pipefail
+          ACTOR="${{ github.actor }}"
+          is_authorized=false
+          IFS=',' read -ra USERS <<< "$ACCESS_LIST"
+          for user in "${USERS[@]}"; do
+          if [[ "$ACTOR" == "$user" ]]; then
+            is_authorized=true
+            break
+          fi
+          done
 
-			if [ "$is_authorized" = true ]; then
-			echo "Actor $ACTOR is authorized. Mirroring comment to GHES PR..."
+          if [ "$is_authorized" = true ]; then
+          echo "Actor $ACTOR is authorized. Mirroring comment to GHES PR..."
 
-			# Find the mirrored PR number on GHES
-			PR_NUM="${{ github.event.issue.number }}"
-			BRANCH="fork-pr-${PR_NUM}"
-			API="${GHES_BASE_URL}/api/v3/repos/${GHES_OWNER}/${GHES_REPO}"
-			GHES_PR_NUM=$(curl -s -H "Authorization: token ${GHES_PAT}" "${API}/pulls?state=open&head=${GHES_OWNER}:${BRANCH}" | jq -r '.[0].number // empty')
+          # Find the mirrored PR number on GHES
+          PR_NUM="${{ github.event.issue.number }}"
+          BRANCH="fork-pr-${PR_NUM}"
+          API="${GHES_BASE_URL}/api/v3/repos/${GHES_OWNER}/${GHES_REPO}"
+          GHES_PR_NUM=$(curl -s -H "Authorization: token ${GHES_PAT}" "${API}/pulls?state=open&head=${GHES_OWNER}:${BRANCH}" | jq -r '.[0].number // empty')
 
-			if [ -z "$GHES_PR_NUM" ]; then
-				echo "No open mirrored GHES PR found. Skipping comment mirroring."
-				exit 0
-			fi
+          if [ -z "$GHES_PR_NUM" ]; then
+            echo "No open mirrored GHES PR found. Skipping comment mirroring."
+            exit 0
+          fi
 
-			# Post the comment to the mirrored PR on GHES
-			COMMENT_BODY="Jenkins-Ready (mirrored from GitHub.com by $ACTOR)"
-			COMMENTS_API="${API}/issues/${GHES_PR_NUM}/comments"
-			curl -s -X POST \
-				-H "Authorization: token ${GHES_PAT}" \
-				-H "Accept: application/vnd.github+json" \
-				"${COMMENTS_API}" \
-				-d "$(jq -n --arg body "$COMMENT_BODY" '{body: $body}')"
-			else
-			echo "Actor $ACTOR is NOT in access list. Skipping comment mirroring."
-			fi
+          # Post the comment to the mirrored PR on GHES
+          COMMENT_BODY="Jenkins-Ready (mirrored from GitHub.com by $ACTOR)"
+          COMMENTS_API="${API}/issues/${GHES_PR_NUM}/comments"
+          curl -s -X POST \
+            -H "Authorization: token ${GHES_PAT}" \
+            -H "Accept: application/vnd.github+json" \
+            "${COMMENTS_API}" \
+            -d "$(jq -n --arg body "$COMMENT_BODY" '{body: $body}')"
+          else
+          echo "Actor $ACTOR is NOT in access list. Skipping comment mirroring."
+          fi
 
       - name: Close up GHES branches for closed upstream PRs
         if: github.event.action == 'closed'
