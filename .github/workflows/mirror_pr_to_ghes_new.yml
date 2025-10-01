@@ -159,7 +159,7 @@ jobs:
           fi
 
           # Post the comment to the mirrored PR on GHES
-          COMMENT_BODY="Jenkins-Ready (mirrored from GitHub.com by $ACTOR)"
+          COMMENT_BODY="Jenkins-Ready"
           COMMENTS_API="${API}/issues/${GHES_PR_NUM}/comments"
           curl -s -X POST \
             -H "Authorization: token ${GHES_PAT}" \
