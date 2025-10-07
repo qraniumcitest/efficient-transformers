@@ -54,6 +54,11 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
+      - name: Exclude workflow files from checkout
+        if: github.event.action != 'closed'
+        run: |
+          git sparse-checkout init --cone
+          git sparse-checkout set --exclude .github/workflows/
 
       - name: Configure git
         if: github.event.action != 'closed'
