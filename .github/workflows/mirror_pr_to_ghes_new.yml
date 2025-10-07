@@ -44,7 +44,7 @@ jobs:
         working-directory: repo
         run: |
           git sparse-checkout init --cone
-          git sparse-checkout set --exclude .github/workflows/
+          # git sparse-checkout set --exclude .github/workflows/
 
       - name: Fetch and checkout PR branch
         if: github.event.action != 'closed'
@@ -52,7 +52,7 @@ jobs:
         run: |
           git fetch origin ${{ github.event.pull_request.head.ref }}:pr_branch
           git checkout pr_branch
-          git sparse-checkout reapply
+          git sparse-checkout set --exclude .github/workflows/
       # - name: Checkout PR head
       #   if: github.event.action != 'closed'
       #   uses: actions/checkout@v4
