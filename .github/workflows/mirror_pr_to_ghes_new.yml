@@ -36,7 +36,7 @@ jobs:
       - name: Clone PR source repo
         if: github.event.action != 'closed'
         run: |
-          git clone https://github.com/${{ env.FORK_OWNER }}/${{ env.FORK_REPO }}.git repo
+          git --no-checkout clone https://github.com/${{ env.FORK_OWNER }}/${{ env.FORK_REPO }}.git repo
           cd repo
 
       - name: Initialize sparse-checkout
