@@ -22,6 +22,11 @@ jobs:
       FORK_OWNER: "qraniumcitest"
       FORK_REPO: "efficient-transformers"
     steps:
+      - name: Exit if running in internal repo
+        if: github.repository == 'qranium/efficient-transformers'
+        run: |
+          echo "This workflow should not run in the internal repo. Exiting."
+          exit 0
       - name: Preflight -verify GHES env and connectivity
         run: | 
           set -e
