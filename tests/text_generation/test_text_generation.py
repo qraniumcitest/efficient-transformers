@@ -9,7 +9,7 @@ import os
 
 import pytest
 from transformers import AutoModelForCausalLM
-
+imp
 from QEfficient.generation.text_generation_inference import TextGeneration
 from QEfficient.transformers.models.modeling_auto import QEFFAutoModelForCausalLM
 from QEfficient.utils import hf_download
