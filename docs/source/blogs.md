@@ -1,4 +1,5 @@
-# Train anywhere, Infer on Qualcomm Cloud AI 100
+# Train anywhere, Infer on Qualcomm Cloud AI 100 
+
  [Click here](https://www.qualcomm.com/developer/blog/2024/01/train-anywhere-infer-qualcomm-cloud-ai-100)
 
 # How to Quadruple LLM Decoding Performance with Speculative Decoding (SpD) and Microscaling (MX) Formats on Qualcomm® Cloud AI 100
