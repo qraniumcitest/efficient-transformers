@@ -59,20 +59,20 @@ jobs:
       #     git checkout pr_branch
 
       - name: Checkout PR head
-        if: github.event.action != 'closed'
+        if: github.event_name == 'pull_request' && github.event.action != 'closed'
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
       - name: Configure git
-        if: github.event.action != 'closed'
+        if: github.event_name == 'pull_request' && github.event.action != 'closed'
         run: |
           git config user.email "pr-mirror@local"
           git config user.name "pr-mirror"
 
       - name: Add GHES remote
-        if: github.event.action != 'closed'
+        if: github.event_name == 'pull_request' && github.event.action != 'closed'
         env:
           GHES_USER: ${{ secrets.GHES_USER}}
           GHES_PAT: ${{ secrets.GHES_PAT }}
@@ -83,7 +83,7 @@ jobs:
           git ls-remote ghes --heads
 
       - name: Push PR branch to GHES
-        if: github.event.action != 'closed'
+        if: github.event_name == 'pull_request' && github.event.action != 'closed'
         id: push_branch
         run: |
           set -euo pipefail
@@ -93,7 +93,7 @@ jobs:
           echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
 
       - name: Create/Update GHES PR
-        if: github.event.action != 'closed'
+        if: github.event_name == 'pull_request' && github.event.action != 'closed'
         env:
           GHES_PAT: ${{ secrets.GHES_PAT }}
         run: |
