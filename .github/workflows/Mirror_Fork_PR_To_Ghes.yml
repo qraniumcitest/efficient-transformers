@@ -79,7 +79,7 @@ jobs:
         run: |
           set -e
           git remote add ghes "${GHES_BASE_URL}/${GHES_OWNER}/${GHES_REPO}.git" || true
-          git remote set-url ghes "https://${GHES_USER}:${GHES_PAT}@github.qualcomm.com/${GHES_OWNER}/${GHES_REPO}.git"
+          git remote set-url ghes "https://${GHES_}:${GHES_PAT}@github.qualcomm.com/${GHES_OWNER}/${GHES_REPO}.git"
           git ls-remote ghes --heads
 
       - name: Push PR branch to GHES
@@ -146,8 +146,9 @@ jobs:
           set -euo pipefail
           ACTOR="${{ github.actor }}"
           is_authorized=false
-          IFS=',' read -ra USERS <<< "$ACCESS_LIST"
+          IFS=',' read -ra S <<< "$ACCESS_LIST"
           for user in "${USERS[@]}"; do
+          user="$(echo "$user" | xargs)"  # trims leading/trailing spaces
           if [[ "$ACTOR" == "$user" ]]; then
             is_authorized=true
             break
