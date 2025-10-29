@@ -6,8 +6,8 @@
 # -----------------------------------------------------------------------------
 
 import argparse
-
 import QEfficient
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Compilation script.")

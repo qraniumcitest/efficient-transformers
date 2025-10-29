@@ -10,7 +10,6 @@ import json
 import os
 import shutil
 from typing import Dict, List, Optional
-
 from QEfficient.utils._utils import create_json, execute_command, load_json
 from QEfficient.utils.constants import QnnConstants
 from QEfficient.utils.generate_qnn_network_specialization_config import (
