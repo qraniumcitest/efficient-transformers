@@ -84,7 +84,7 @@ jobs:
         run: |
           set -e
           git remote add ghes "${GHES_BASE_URL}/${GHES_OWNER}/${GHES_REPO}.git" || true
-          git remote set-url ghes "https://${GHES_USER}:${GHES_PAT}@github.qualcomm.com/${GHES_OWNER}/${GHES_REPO}.git"
+          git remote set-url ghes "https://x-access-token:${GHES_PAT}@github.qualcomm.com/${GHES_OWNER}/${GHES_REPO}.git"
           git ls-remote ghes --heads
 
       - name: Push PR branch to GHES
