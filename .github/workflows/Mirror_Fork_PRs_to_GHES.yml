@@ -27,6 +27,11 @@ jobs:
         run: |
           echo "This workflow should not run in the internal repo. Exiting."
           exit 0
+      - name: Debug event
+        run: |
+          echo "Event name: ${{ github.event_name }}"
+          echo "Action: ${{ github.event.action }}"
+          
       - name: Preflight -verify GHES env and connectivity
         run: | 
           set -e
