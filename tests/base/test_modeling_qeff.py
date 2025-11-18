@@ -6,7 +6,7 @@
 # -----------------------------------------------------------------------------
 
 from types import SimpleNamespace
-
+import numpy
 import onnx
 import pytest
 
