@@ -1,0 +1,31 @@
+name: QGenie Internal Review Summary (Dummy)
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "External PR number to update/check"
+        required: true
+        type: string
+
+jobs:
+  dummy_qgenie_sync_check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Print incoming inputs
+        run: |
+          echo "=== QGenie Internal Review Summary (Dummy) ==="
+          echo "Repository: ${{ github.repository }}"
+          echo "Workflow run ID: ${{ github.run_id }}"
+          echo "Triggered by: ${{ github.actor }}"
+          echo "Event name:  ${{ github.event_name }}"
+          echo "PR number input: ${{ github.event.inputs.pr_number }}"
+          echo "=============================================="
+
+      - name: Simulate QGenie summary processing
+        run: |
+          PR_NUMBER="${{ github.event.inputs.pr_number }}"
+          echo "Pretending to read QGenie summary for PR #${PR_NUMBER}..."
+          echo "If you see this, internal -> external workflow_dispatch signaling works correctly 🎉"
+          echo "Next step: replace this dummy job with real NFS/JSON reading logic."
