@@ -1,5 +1,4 @@
 FP32NodeInstanceNames:
-
   - /language_model/layers.0/Add_1_output_0
   - /language_model/layers.0/Add_2_output_0
   - /language_model/layers.0/Add_3_output_0
