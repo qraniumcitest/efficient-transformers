@@ -1,31 +1,65 @@
-name: QGenie Internal Review Summary (Dummy)
+name: Internal Review Summary
 
 on:
   workflow_dispatch:
     inputs:
       pr_number:
-        description: "External PR number to update/check"
+        description: "External PR number"
         required: true
-        type: string
 
 jobs:
-  dummy_qgenie_sync_check:
-    runs-on: ubuntu-latest
-
+  internal_review_summary:
+    runs-on: self-hosted
     steps:
-      - name: Print incoming inputs
+      - name: Show inputs
         run: |
-          echo "=== QGenie Internal Review Summary (Dummy) ==="
-          echo "Repository: ${{ github.repository }}"
-          echo "Workflow run ID: ${{ github.run_id }}"
-          echo "Triggered by: ${{ github.actor }}"
-          echo "Event name:  ${{ github.event_name }}"
-          echo "PR number input: ${{ github.event.inputs.pr_number }}"
-          echo "=============================================="
+          echo "Triggered internal review summary for PR #${{ github.event.inputs.pr_number }}"
 
-      - name: Simulate QGenie summary processing
+      - name: Locate internal review JSON on NFS
+        id: locate
+        env:
+          PR_NUMBER: ${{ github.event.inputs.pr_number }}
         run: |
-          PR_NUMBER="${{ github.event.inputs.pr_number }}"
-          echo "Pretending to read QGenie summary for PR #${PR_NUMBER}..."
-          echo "If you see this, internal -> external workflow_dispatch signaling works correctly 🎉"
-          echo "Next step: replace this dummy job with real NFS/JSON reading logic."
+          set -euo pipefail
+
+          BASE_DIR="/prj/bdcqranium/qranium-ci/qeff-comments"
+          FILE_PATH="${BASE_DIR}/pr-${PR_NUMBER}.json"
+
+          echo "Looking for internal review JSON: ${FILE_PATH}..."
+
+          if [ -f "${FILE_PATH}" ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "file_path=${FILE_PATH}" >> "$GITHUB_OUTPUT"
+            echo "Found internal review JSON for PR #${PR_NUMBER}."
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "file_path=${FILE_PATH}" >> "$GITHUB_OUTPUT"
+            echo "No internal review JSON found for PR #${PR_NUMBER}."
+          fi
+
+      - name: Print internal review summary from JSON
+        if: steps.locate.outputs.found == 'true'
+        env:
+          FILE_PATH: ${{ steps.locate.outputs.file_path }}
+        run: |
+          set -euo pipefail
+
+          echo "Reading internal review summary from ${FILE_PATH}"
+
+          if command -v jq >/dev/null 2>&1; then
+            RAW_COMMENT=$(jq -r '.raw_comment // ""' "${FILE_PATH}")
+          else
+            echo "jq not found, printing raw file as-is:"
+            cat "${FILE_PATH}"
+            exit 0
+          fi
+
+          echo "===== Internal Review Summary (from internal CI) ====="
+          echo "${RAW_COMMENT}"
+          echo "===== End of Internal Review Summary ====="
+
+      - name: Handle missing internal review JSON gracefully
+        if: steps.locate.outputs.found != 'true'
+        run: |
+          echo "Internal review JSON file not found at: ${{ steps.locate.outputs.file_path }}"
+          echo "This might mean the internal review hasn't completed or export hasn't run yet."
