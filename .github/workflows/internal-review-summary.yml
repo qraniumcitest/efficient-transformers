@@ -106,8 +106,8 @@ jobs:
           echo "Computed state: $STATE"
           echo "Summary: $SUMMARY"
 
-          echo "worst_state=$STATE"   >> "$GITHUB_OUTPUT"
-          echo "worst_summary=$SUMMARY" >> "$GITHUB_OUTPUT"
+          echo "worst_state=$STATE"       >> "$GITHUB_OUTPUT"
+          echo "worst_summary=$SUMMARY"   >> "$GITHUB_OUTPUT"
 
       - name: Print internal review summary from JSON
         if: steps.locate.outputs.found == 'true'
@@ -137,18 +137,20 @@ jobs:
           echo "Internal review JSON file not found at: ${{ steps.locate.outputs.file_path }}"
           echo "This might mean the internal review hasn't completed or export hasn't run yet."
 
-      # 🔴 This step creates the actual PR check via commit status
+      # This step creates the actual PR check via commit status
       - name: Post internal-review status on commit
         # run even if JSON missing or analyze step failed
         if: always()
         env:
-          GH_TOKEN:   ${{ secrets.GH_PAT }}
-          ORIG_REPO:  ${{ github.event.inputs.orig_repo }}
-          ORIG_SHA:   ${{ github.event.inputs.orig_sha }}
-          ANALYZE_STATE:   ${{ steps.analyze.outputs.worst_state }}
-          ANALYZE_SUMMARY: ${{ steps.analyze.outputs.worst_summary }}
-          JSON_FOUND:      ${{ steps.locate.outputs.found }}
-          PR_NUM:          ${{ github.event.inputs.pr_number }}
+          GH_TOKEN:          ${{ secrets.GITHUB_TOKEN }}
+          ORIG_REPO:         ${{ github.event.inputs.orig_repo }}
+          ORIG_SHA:          ${{ github.event.inputs.orig_sha }}
+          ANALYZE_STATE:     ${{ steps.analyze.outputs.worst_state }}
+          ANALYZE_SUMMARY:   ${{ steps.analyze.outputs.worst_summary }}
+          JSON_FOUND:        ${{ steps.locate.outputs.found }}
+          PR_NUM:            ${{ github.event.inputs.pr_number }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID:     ${{ github.run_id }}
         run: |
           set -euo pipefail
 
@@ -169,8 +171,9 @@ jobs:
           echo "Final state: $STATE"
           echo "Final summary: $SUMMARY"
 
-          # TODO: point this to your internal UI or static report URL
-          TARGET_URL="https://your-internal-qgenie-ui/pr/${PR_NUM}"
+          # Point Details to this exact Actions run on GitHub.com
+          TARGET_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          echo "Details URL: $TARGET_URL"
 
           echo "Posting status to $ORIG_REPO @ $ORIG_SHA"
           curl -sS -X POST \
