@@ -142,7 +142,7 @@ jobs:
         # run even if JSON missing or analyze step failed
         if: always()
         env:
-          GH_TOKEN:   ${{ secrets.GH_COM_PAT }}
+          GH_TOKEN:   ${{ secrets.GH_PAT }}
           ORIG_REPO:  ${{ github.event.inputs.orig_repo }}
           ORIG_SHA:   ${{ github.event.inputs.orig_sha }}
           ANALYZE_STATE:   ${{ steps.analyze.outputs.worst_state }}
