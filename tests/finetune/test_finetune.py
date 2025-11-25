@@ -7,7 +7,6 @@
 
 import os
 import shutil
-
 import numpy as np
 import pytest
 import requests
@@ -301,3 +300,4 @@ def test_finetune(
 
     if dataset_name == "alpaca_dataset":
         clean_up(alpaca_json_path)
+
