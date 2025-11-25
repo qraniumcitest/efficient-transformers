@@ -107,16 +107,18 @@ jobs:
           BRANCH="${{ steps.push_branch.outputs.branch }}"
           TITLE="${{ github.event.pull_request.title }}"
           HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          HEAD_REF="${{ github.event.pull_request.head.ref }}"
           BODY_RAW="${{ github.event.pull_request.body }}"
           URL="${{ github.event.pull_request.html_url }}"
           BODY_ESCAPED="$(echo "$BODY_RAW" | tr '\n' ' ' | tr '\r' ' ')"
 
-          META=$(printf '%s\n%s\n%s\n%s\n%s\n' \
-            '[Mirror Metadata]' \
-            "Original-PR-Repo: ${{ env.FORK_OWNER }}/${{ env.FORK_REPO }}" \
-            "Original-PR-Number: ${PR_NUM}" \
-            "Original-PR-URL: ${URL}" \
-            "Original-Head-SHA: ${HEAD_SHA}")
+          META=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n' \
+                '[Mirror Metadata]' \
+                "Original-PR-Repo: ${{ env.FORK_OWNER }}/${{ env.FORK_REPO }}" \
+                "Original-PR-Number: ${PR_NUM}" \
+                "Original-PR-URL: ${URL}" \
+                "Original-Head-SHA: ${HEAD_SHA}" \
+                "Original-Head-Branch: ${HEAD_REF}")
 
           PR_BODY=$(printf '%s\n\n%s\n\n%s\n' \
             "$URL" \
