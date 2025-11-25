@@ -9,8 +9,6 @@ import math
 
 import torch
 from torch import nn
-
-
 class QuantLinearTorchFunction(torch.autograd.Function):
     @staticmethod
     def symbolic(g, x, qself_qweight, qself_scales, qself_qzeros, g_idx, bits, group_size, in_features, out_features):
