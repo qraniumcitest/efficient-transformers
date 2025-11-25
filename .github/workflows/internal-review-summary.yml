@@ -6,14 +6,23 @@ on:
       pr_number:
         description: "External PR number"
         required: true
+      orig_repo:
+        description: "External repository (e.g. org/repo)"
+        required: true
+      orig_sha:
+        description: "External PR head SHA"
+        required: true
 
 jobs:
   internal_review_summary:
     runs-on: self-hosted
+
     steps:
       - name: Show inputs
         run: |
           echo "Triggered internal review summary for PR #${{ github.event.inputs.pr_number }}"
+          echo "Original repo: ${{ github.event.inputs.orig_repo }}"
+          echo "Original SHA:  ${{ github.event.inputs.orig_sha }}"
 
       - name: Locate internal review JSON on NFS
         id: locate
@@ -37,6 +46,69 @@ jobs:
             echo "No internal review JSON found for PR #${PR_NUMBER}."
           fi
 
+      - name: Analyze internal review JSON for severity
+        id: analyze
+        if: steps.locate.outputs.found == 'true'
+        env:
+          FILE_PATH: ${{ steps.locate.outputs.file_path }}
+        run: |
+          set -euo pipefail
+
+          echo "Analyzing internal review JSON: ${FILE_PATH}"
+
+          if ! command -v jq >/dev/null 2>&1; then
+            echo "jq not found; marking state as failure (cannot analyze)"
+            echo "worst_state=failure" >> "$GITHUB_OUTPUT"
+            echo "worst_summary=Internal review JSON found but jq is missing" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "File content:"
+          cat "${FILE_PATH}"
+
+          # Adjust this depending on your JSON structure.
+          # Example assumes .issues[] with .severity and .summary.
+          SEVERITIES=$(jq -r '.issues[].severity // empty' "${FILE_PATH}" || echo "")
+
+          if [ -z "$SEVERITIES" ]; then
+            echo "No severities found; treating as no issues"
+            echo "worst_state=success" >> "$GITHUB_OUTPUT"
+            echo "worst_summary=No issues reported in internal review" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Map severities to numeric ranks (higher = worse)
+          WORST=0
+          while read -r sev; do
+            case "$sev" in
+              HIGH|Critical|BLOCKER) R=3 ;;
+              MEDIUM|Major)          R=2 ;;
+              LOW|Minor|Info)        R=1 ;;
+              *)                     R=0 ;;
+            esac
+            if [ "$R" -gt "$WORST" ]; then WORST="$R"; fi
+          done <<< "$SEVERITIES"
+
+          if   [ "$WORST" -ge 3 ]; then
+            STATE="failure"
+            SUMMARY="Internal review found HIGH severity issues"
+          elif [ "$WORST" -ge 2 ]; then
+            STATE="failure"
+            SUMMARY="Internal review found MEDIUM severity issues"
+          elif [ "$WORST" -ge 1 ]; then
+            STATE="success"
+            SUMMARY="Only LOW severity issues found in internal review"
+          else
+            STATE="success"
+            SUMMARY="No relevant issues found in internal review"
+          fi
+
+          echo "Computed state: $STATE"
+          echo "Summary: $SUMMARY"
+
+          echo "worst_state=$STATE"   >> "$GITHUB_OUTPUT"
+          echo "worst_summary=$SUMMARY" >> "$GITHUB_OUTPUT"
+
       - name: Print internal review summary from JSON
         if: steps.locate.outputs.found == 'true'
         env:
@@ -59,7 +131,60 @@ jobs:
           echo "===== End of Internal Review Summary ====="
 
       - name: Handle missing internal review JSON gracefully
+        id: missing_json
         if: steps.locate.outputs.found != 'true'
         run: |
           echo "Internal review JSON file not found at: ${{ steps.locate.outputs.file_path }}"
           echo "This might mean the internal review hasn't completed or export hasn't run yet."
+
+      # 🔴 This step creates the actual PR check via commit status
+      - name: Post internal-review status on commit
+        # run even if JSON missing or analyze step failed
+        if: always()
+        env:
+          GH_TOKEN:   ${{ secrets.GH_COM_PAT }}
+          ORIG_REPO:  ${{ github.event.inputs.orig_repo }}
+          ORIG_SHA:   ${{ github.event.inputs.orig_sha }}
+          ANALYZE_STATE:   ${{ steps.analyze.outputs.worst_state }}
+          ANALYZE_SUMMARY: ${{ steps.analyze.outputs.worst_summary }}
+          JSON_FOUND:      ${{ steps.locate.outputs.found }}
+          PR_NUM:          ${{ github.event.inputs.pr_number }}
+        run: |
+          set -euo pipefail
+
+          # Decide final state & summary
+          if [ "$JSON_FOUND" != "true" ]; then
+            STATE="failure"
+            SUMMARY="Internal review JSON missing or not yet generated"
+          else
+            if [ -z "$ANALYZE_STATE" ]; then
+              STATE="failure"
+              SUMMARY="Internal review analysis failed"
+            else
+              STATE="$ANALYZE_STATE"
+              SUMMARY="$ANALYZE_SUMMARY"
+            fi
+          fi
+
+          echo "Final state: $STATE"
+          echo "Final summary: $SUMMARY"
+
+          # TODO: point this to your internal UI or static report URL
+          TARGET_URL="https://your-internal-qgenie-ui/pr/${PR_NUM}"
+
+          echo "Posting status to $ORIG_REPO @ $ORIG_SHA"
+          curl -sS -X POST \
+            -H "Authorization: token $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${ORIG_REPO}/statuses/${ORIG_SHA}" \
+            -d "$(jq -n \
+              --arg state "$STATE" \
+              --arg context "internal-review/qgenie" \
+              --arg description "$SUMMARY" \
+              --arg target_url "$TARGET_URL" \
+              '{
+                state: $state,
+                context: $context,
+                description: $description,
+                target_url: $target_url
+              }')"
