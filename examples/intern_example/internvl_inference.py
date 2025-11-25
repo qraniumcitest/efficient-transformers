@@ -7,7 +7,6 @@
 
 from io import BytesIO
 from typing import List
-
 import requests
 import torch
 from PIL import Image
