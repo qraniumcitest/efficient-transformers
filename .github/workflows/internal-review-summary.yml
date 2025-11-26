@@ -46,7 +46,7 @@ jobs:
             echo "No internal review JSON found for PR #${PR_NUMBER}."
           fi
 
-      - name: Analyze internal review JSON for severity
+      - name: Analyze internal review JSON via helper script
         id: analyze
         if: steps.locate.outputs.found == 'true'
         env:
@@ -54,92 +54,25 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "Analyzing internal review JSON: ${FILE_PATH}"
+          PY_HELPER="/prj/bdcqranium/qranium-ci/qeff-comments/Json-Parser/internal_review_analyzer.py"
 
-          if ! command -v jq >/dev/null 2>&1; then
-            echo "jq not found; marking state as failure (cannot analyze)"
+          if [ ! -x "$PY_HELPER" ]; then
+            echo "ERROR: Helper script not found or not executable: $PY_HELPER"
             echo "worst_state=failure" >> "$GITHUB_OUTPUT"
-            echo "worst_summary=Internal review JSON found but jq is missing" >> "$GITHUB_OUTPUT"
+            echo "worst_summary=Internal review helper script missing" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          echo "File content:"
-          cat "${FILE_PATH}"
+          echo "Using helper script: $PY_HELPER"
+          python3 "$PY_HELPER" "$FILE_PATH"
 
-          # Adjust this depending on your JSON structure.
-          # Example assumes .issues[] with .severity and .summary.
-          SEVERITIES=$(jq -r '.issues[].severity // empty' "${FILE_PATH}" || echo "")
-
-          if [ -z "$SEVERITIES" ]; then
-            echo "No severities found; treating as no issues"
-            echo "worst_state=success" >> "$GITHUB_OUTPUT"
-            echo "worst_summary=No issues reported in internal review" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          # Map severities to numeric ranks (higher = worse)
-          WORST=0
-          while read -r sev; do
-            case "$sev" in
-              HIGH|Critical|BLOCKER) R=3 ;;
-              MEDIUM|Major)          R=2 ;;
-              LOW|Minor|Info)        R=1 ;;
-              *)                     R=0 ;;
-            esac
-            if [ "$R" -gt "$WORST" ]; then WORST="$R"; fi
-          done <<< "$SEVERITIES"
-
-          if   [ "$WORST" -ge 3 ]; then
-            STATE="failure"
-            SUMMARY="Internal review found HIGH severity issues"
-          elif [ "$WORST" -ge 2 ]; then
-            STATE="failure"
-            SUMMARY="Internal review found MEDIUM severity issues"
-          elif [ "$WORST" -ge 1 ]; then
-            STATE="success"
-            SUMMARY="Only LOW severity issues found in internal review"
-          else
-            STATE="success"
-            SUMMARY="No relevant issues found in internal review"
-          fi
-
-          echo "Computed state: $STATE"
-          echo "Summary: $SUMMARY"
-
-          echo "worst_state=$STATE"       >> "$GITHUB_OUTPUT"
-          echo "worst_summary=$SUMMARY"   >> "$GITHUB_OUTPUT"
-
-      - name: Print internal review summary from JSON
-        if: steps.locate.outputs.found == 'true'
-        env:
-          FILE_PATH: ${{ steps.locate.outputs.file_path }}
-        run: |
-          set -euo pipefail
-
-          echo "Reading internal review summary from ${FILE_PATH}"
-
-          if command -v jq >/dev/null 2>&1; then
-            RAW_COMMENT=$(jq -r '.raw_comment // ""' "${FILE_PATH}")
-          else
-            echo "jq not found, printing raw file as-is:"
-            cat "${FILE_PATH}"
-            exit 0
-          fi
-
-          echo "===== Internal Review Summary (from internal CI) ====="
-          echo "${RAW_COMMENT}"
-          echo "===== End of Internal Review Summary ====="
-
-      - name: Handle missing internal review JSON gracefully
-        id: missing_json
+      - name: Handle missing internal review JSON
         if: steps.locate.outputs.found != 'true'
         run: |
           echo "Internal review JSON file not found at: ${{ steps.locate.outputs.file_path }}"
           echo "This might mean the internal review hasn't completed or export hasn't run yet."
 
-      # This step creates the actual PR check via commit status
       - name: Post internal-review status on commit
-        # run even if JSON missing or analyze step failed
         if: always()
         env:
           GH_TOKEN:          ${{ secrets.GITHUB_TOKEN }}
@@ -154,12 +87,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Decide final state & summary
           if [ "$JSON_FOUND" != "true" ]; then
             STATE="failure"
             SUMMARY="Internal review JSON missing or not yet generated"
           else
-            if [ -z "$ANALYZE_STATE" ]; then
+            if [ -z "${ANALYZE_STATE:-}" ]; then
               STATE="failure"
               SUMMARY="Internal review analysis failed"
             else
@@ -171,7 +103,6 @@ jobs:
           echo "Final state: $STATE"
           echo "Final summary: $SUMMARY"
 
-          # Point Details to this exact Actions run on GitHub.com
           TARGET_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           echo "Details URL: $TARGET_URL"
 
