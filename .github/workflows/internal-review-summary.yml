@@ -4,121 +4,118 @@ on:
   workflow_dispatch:
     inputs:
       pr_number:
-        description: "External PR number"
+        description: "Original PR number"
         required: true
+        type: string
       orig_repo:
-        description: "External repository (e.g. org/repo)"
+        description: "Original repo (owner/repo)"
         required: true
+        type: string
       orig_sha:
-        description: "External PR head SHA"
+        description: "Original head SHA"
         required: true
+        type: string
 
 jobs:
-  internal_review_summary:
-    runs-on: self-hosted
+  summarize-internal-review:
+    runs-on: [self-hosted, Linux, X64, internal]
 
     steps:
-      - name: Show inputs
+      - name: 📥 Input parameters (PR / repo / SHA)
+        id: show-inputs
         run: |
-          echo "Triggered internal review summary for PR #${{ github.event.inputs.pr_number }}"
-          echo "Original repo: ${{ github.event.inputs.orig_repo }}"
-          echo "Original SHA:  ${{ github.event.inputs.orig_sha }}"
+          echo "PR number : ${{ inputs.pr_number }}"
+          echo "Repo      : ${{ inputs.orig_repo }}"
+          echo "Head SHA  : ${{ inputs.orig_sha }}"
 
-      - name: Locate internal review JSON on NFS
-        id: locate
-        env:
-          PR_NUMBER: ${{ github.event.inputs.pr_number }}
+      - name: 📂 Locate internal-review JSON on NFS
+        id: locate-json
+        run: |
+          set -euo pipefail
+          NFS_BASE="/prj/bdcqranium/qranium-ci/qeff-comments"
+          JSON_PATH="${NFS_BASE}/pr-${{ inputs.pr_number }}.json"
+
+          echo "Expected JSON path: ${JSON_PATH}"
+
+          if [ ! -f "${JSON_PATH}" ]; then
+            echo "ERROR: JSON file not found at ${JSON_PATH}"
+            exit 1
+          fi
+
+          echo "json_path=${JSON_PATH}" >> "$GITHUB_OUTPUT"
+
+      - name: 👀 Raw JSON preview (first 400 chars)
+        id: preview-json
+        run: |
+          set -euo pipefail
+          JSON_PATH="${{ steps.locate-json.outputs.json_path }}"
+          echo "Reading JSON from: ${JSON_PATH}"
+          echo "----- JSON preview (first 400 chars) -----"
+          head -c 400 "${JSON_PATH}" || true
+          echo
+          echo "------------------------------------------"
+
+      - name: 📊 Analyze review (summary, files, critical_issues)
+        id: analyze-review
         run: |
           set -euo pipefail
 
-          BASE_DIR="/prj/bdcqranium/qranium-ci/qeff-comments"
-          FILE_PATH="${BASE_DIR}/pr-${PR_NUMBER}.json"
+          JSON_PATH="${{ steps.locate-json.outputs.json_path }}"
 
-          echo "Looking for internal review JSON: ${FILE_PATH}..."
+          echo "===== Parsed Summary ====="
+          HIGHEST_SEV=$(jq -r '.summary.highest_severity // "None"' "${JSON_PATH}")
+          TOTAL_FILES=$(jq -r '.summary.total_files // 0' "${JSON_PATH}")
+          TOTAL_ISSUES=$(jq -r '.summary.total_issues // 0' "${JSON_PATH}")
 
-          if [ -f "${FILE_PATH}" ]; then
-            echo "found=true" >> "$GITHUB_OUTPUT"
-            echo "file_path=${FILE_PATH}" >> "$GITHUB_OUTPUT"
-            echo "Found internal review JSON for PR #${PR_NUMBER}."
-          else
-            echo "found=false" >> "$GITHUB_OUTPUT"
-            echo "file_path=${FILE_PATH}" >> "$GITHUB_OUTPUT"
-            echo "No internal review JSON found for PR #${PR_NUMBER}."
-          fi
+          echo "  total_files     = ${TOTAL_FILES}"
+          echo "  total_issues    = ${TOTAL_ISSUES}"
+          echo "  highestSeverity = ${HIGHEST_SEV}"
+          echo
 
-      - name: Analyze internal review JSON via helper script
-        id: analyze
-        if: steps.locate.outputs.found == 'true'
-        env:
-          FILE_PATH: ${{ steps.locate.outputs.file_path }}
-        run: |
-          set -euo pipefail
+          echo "===== Files (Critical/High only) ====="
+          echo ""
+          echo "| File Path | Lines Changed | Issues Found | Highest Severity |"
+          echo "|-----------|---------------|--------------|------------------|"
 
-          PY_HELPER="/prj/bdcqranium/qranium-ci/qeff-comments/Json-Parser/internal_review_analyzer.py"
+          jq -r '
+            .files[]? |
+            [
+              .file_path // "",
+              .lines_changed // "",
+              .issues_found // "",
+              .highest_severity // ""
+            ]
+            | @tsv
+          ' "${JSON_PATH}" | while IFS=$'\t' read -r path lines issues sev; do
+            clean_path="${path#\`}"
+            clean_path="${clean_path%\`}"
+            echo "| ${clean_path} | ${lines} | ${issues} | ${sev} |"
+          done
 
-          if [ ! -x "$PY_HELPER" ]; then
-            echo "ERROR: Helper script not found or not executable: $PY_HELPER"
-            echo "worst_state=failure" >> "$GITHUB_OUTPUT"
-            echo "worst_summary=Internal review helper script missing" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          echo ""
+          echo "===== Critical issues (all) ====="
+          echo ""
 
-          echo "Using helper script: $PY_HELPER"
-          python3 "$PY_HELPER" "$FILE_PATH"
+          jq -r '
+            .critical_issues[]? |
+            "- [" + (.severity // "") + "] " + (.one_line // "") 
+          ' "${JSON_PATH}" || true
 
-      - name: Handle missing internal review JSON
-        if: steps.locate.outputs.found != 'true'
-        run: |
-          echo "Internal review JSON file not found at: ${{ steps.locate.outputs.file_path }}"
-          echo "This might mean the internal review hasn't completed or export hasn't run yet."
+          echo ""
+          echo "===== Decision ====="
 
-      - name: Post internal-review status on commit
-        if: always()
-        env:
-          GH_TOKEN:          ${{ secrets.GITHUB_TOKEN }}
-          ORIG_REPO:         ${{ github.event.inputs.orig_repo }}
-          ORIG_SHA:          ${{ github.event.inputs.orig_sha }}
-          ANALYZE_STATE:     ${{ steps.analyze.outputs.worst_state }}
-          ANALYZE_SUMMARY:   ${{ steps.analyze.outputs.worst_summary }}
-          JSON_FOUND:        ${{ steps.locate.outputs.found }}
-          PR_NUM:            ${{ github.event.inputs.pr_number }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_RUN_ID:     ${{ github.run_id }}
-        run: |
-          set -euo pipefail
-
-          if [ "$JSON_FOUND" != "true" ]; then
-            STATE="failure"
-            SUMMARY="Internal review JSON missing or not yet generated"
-          else
-            if [ -z "${ANALYZE_STATE:-}" ]; then
-              STATE="failure"
-              SUMMARY="Internal review analysis failed"
-            else
-              STATE="$ANALYZE_STATE"
-              SUMMARY="$ANALYZE_SUMMARY"
-            fi
-          fi
-
-          echo "Final state: $STATE"
-          echo "Final summary: $SUMMARY"
-
-          TARGET_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          echo "Details URL: $TARGET_URL"
-
-          echo "Posting status to $ORIG_REPO @ $ORIG_SHA"
-          curl -sS -X POST \
-            -H "Authorization: token $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${ORIG_REPO}/statuses/${ORIG_SHA}" \
-            -d "$(jq -n \
-              --arg state "$STATE" \
-              --arg context "internal-review/qgenie" \
-              --arg description "$SUMMARY" \
-              --arg target_url "$TARGET_URL" \
-              '{
-                state: $state,
-                context: $context,
-                description: $description,
-                target_url: $target_url
-              }')"
+          case "${HIGHEST_SEV}" in
+            Critical|High)
+              echo "Overall severity is ${HIGHEST_SEV} -> marking job as FAILED."
+              echo "worst_severity=${HIGHEST_SEV}" >> "$GITHUB_OUTPUT"
+              exit 1
+              ;;
+            Medium|Low|None|"")
+              echo "Overall severity is ${HIGHEST_SEV} -> marking job as PASSED."
+              echo "worst_severity=${HIGHEST_SEV}" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Unknown severity '${HIGHEST_SEV}' -> treating as PASSED."
+              echo "worst_severity=${HIGHEST_SEV}" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
