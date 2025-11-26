@@ -8,7 +8,7 @@
 import os
 from time import perf_counter
 
-import numpy as n
+import numpy as 
 import onnx
 import pytest
 import torch
