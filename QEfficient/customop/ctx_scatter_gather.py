@@ -8,7 +8,7 @@
 import onnxscript
 import torch
 
-from QEfficient.utils import constants
+from QEfficient.utils import constant
 
 ops = getattr(onnxscript, "opset" + str(constants.ONNX_EXPORT_OPSET))
 
