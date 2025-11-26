@@ -119,3 +119,53 @@ jobs:
               echo "worst_severity=${HIGHEST_SEV}" >> "$GITHUB_OUTPUT"
               ;;
           esac
+
+      # ✅ Post internal-review status on original commit (restored)
+      - name: ✅ Post internal-review status on original commit
+        if: always()
+        env:
+          GH_TOKEN:       ${{ secrets.GITHUB_TOKEN }}
+          ORIG_REPO:      ${{ inputs.orig_repo }}
+          ORIG_SHA:       ${{ inputs.orig_sha }}
+          WORST_SEVERITY: ${{ steps.analyze-review.outputs.worst_severity }}
+          GITHUB_REPO:    ${{ github.repository }}
+          GITHUB_RUN_ID:  ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          # Map worst_severity to GitHub status state
+          case "${WORST_SEVERITY}" in
+            Critical|High)
+              STATE="failure"
+              ;;
+            Medium|Low|None|"")
+              STATE="success"
+              ;;
+            *)
+              STATE="success"
+              ;;
+          esac
+
+          SUMMARY="Internal review: worst severity=${WORST_SEVERITY}"
+
+          TARGET_URL="https://github.com/${GITHUB_REPO}/actions/runs/${GITHUB_RUN_ID}"
+          echo "Final state: ${STATE}"
+          echo "Summary    : ${SUMMARY}"
+          echo "Details URL: ${TARGET_URL}"
+          echo "Posting status to ${ORIG_REPO} @ ${ORIG_SHA}"
+
+          curl -sS -X POST \
+            -H "Authorization: token ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${ORIG_REPO}/statuses/${ORIG_SHA}" \
+            -d "$(jq -n \
+              --arg state "$STATE" \
+              --arg context "internal-review/qgenie" \
+              --arg description "$SUMMARY" \
+              --arg target_url "$TARGET_URL" \
+              '{
+                state: $state,
+                context: $context,
+                description: $description,
+                target_url: $target_url
+              }')"
