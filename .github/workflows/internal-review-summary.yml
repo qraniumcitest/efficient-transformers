@@ -18,7 +18,7 @@ on:
 
 jobs:
   summarize-internal-review:
-    runs-on: self-hosted
+    runs-on: [self-hosted, Linux, X64, internal]
 
     steps:
       - name: 📥 Input parameters (PR / repo / SHA)
@@ -55,55 +55,39 @@ jobs:
           echo
           echo "------------------------------------------"
 
-      - name: 📊 Analyze review (summary, files, critical_issues)
+      - name: 📊 Analyze review using Python helper on NFS
         id: analyze-review
         run: |
           set -euo pipefail
 
           JSON_PATH="${{ steps.locate-json.outputs.json_path }}"
+          # 🔁 Adjust this path to where your qgenie_print_summary.py actually lives on NFS
+          PY_HELPER="/prj/bdcqranium/qranium-ci/qeff-comments/Json-Parser/internal_review_analyzer.py"
 
-          echo "===== Parsed Summary ====="
+          echo "Using JSON: ${JSON_PATH}"
+          echo "Using Python helper: ${PY_HELPER}"
+          echo "Python version:"
+          python3 --version || true
+          echo
+
+          # ---- Call the Python helper to print the rich human-readable summary ----
+          echo "===== Python helper output ====="
+          python3 "${PY_HELPER}" "${JSON_PATH}"
+          echo "===== End of Python helper output ====="
+          echo
+
+          # ---- Also compute summary fields via jq for worst_severity + logging ----
           HIGHEST_SEV=$(jq -r '.summary.highest_severity // "None"' "${JSON_PATH}")
           TOTAL_FILES=$(jq -r '.summary.total_files // 0' "${JSON_PATH}")
           TOTAL_ISSUES=$(jq -r '.summary.total_issues // 0' "${JSON_PATH}")
 
+          echo "===== Parsed Summary (from JSON) ====="
           echo "  total_files     = ${TOTAL_FILES}"
           echo "  total_issues    = ${TOTAL_ISSUES}"
           echo "  highestSeverity = ${HIGHEST_SEV}"
           echo
 
-          echo "===== Files (Critical/High only) ====="
-          echo ""
-          echo "| File Path | Lines Changed | Issues Found | Highest Severity |"
-          echo "|-----------|---------------|--------------|------------------|"
-
-          jq -r '
-            .files[]? |
-            [
-              .file_path // "",
-              .lines_changed // "",
-              .issues_found // "",
-              .highest_severity // ""
-            ]
-            | @tsv
-          ' "${JSON_PATH}" | while IFS=$'\t' read -r path lines issues sev; do
-            clean_path="${path#\`}"
-            clean_path="${clean_path%\`}"
-            echo "| ${clean_path} | ${lines} | ${issues} | ${sev} |"
-          done
-
-          echo ""
-          echo "===== Critical issues (all) ====="
-          echo ""
-
-          jq -r '
-            .critical_issues[]? |
-            "- [" + (.severity // "") + "] " + (.one_line // "") 
-          ' "${JSON_PATH}" || true
-
-          echo ""
-          echo "===== Decision ====="
-
+          echo "===== Decision (based on highestSeverity) ====="
           case "${HIGHEST_SEV}" in
             Critical|High)
               echo "Overall severity is ${HIGHEST_SEV} -> marking job as FAILED."
@@ -120,7 +104,7 @@ jobs:
               ;;
           esac
 
-      # ✅ Post internal-review status on original commit (restored)
+      # ✅ Post internal-review status on original commit (same as before)
       - name: ✅ Post internal-review status on original commit
         if: always()
         env:
