@@ -7,7 +7,7 @@
 
 from typing import Tuple
 
-import onnx
+import onn
 
 from QEfficient.base.onnx_transforms import OnnxTransform
 
