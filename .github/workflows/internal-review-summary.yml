@@ -18,7 +18,7 @@ on:
 
 jobs:
   summarize-internal-review:
-    runs-on: [self-hosted, Linux, X64, internal]
+    runs-on: self-hosted
 
     steps:
       - name: 📥 Input parameters (PR / repo / SHA)
