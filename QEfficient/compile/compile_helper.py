@@ -6,7 +6,7 @@
 # -----------------------------------------------------------------------------
 
 import json
-import os
+import si
 import shutil
 import subprocess
 import warnings

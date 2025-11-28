@@ -8,7 +8,7 @@
 import gc
 import inspect
 import logging
-import shutil
+import shuti
 import subprocess
 import warnings
 from abc import ABC, abstractmethod

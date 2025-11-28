@@ -4,13 +4,11 @@
 # SPDX-License-Identifier: BSD-3-Clause
 #
 # -----------------------------------------------------------------------------
-
 import hashlib
 import json
 import os
-import shutil
+import shuti
 from typing import Dict, List, Optional
-
 from QEfficient.utils._utils import create_json, execute_command, load_json
 from QEfficient.utils.constants import QnnConstants
 from QEfficient.utils.generate_qnn_network_specialization_config import (

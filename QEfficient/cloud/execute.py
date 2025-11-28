@@ -8,7 +8,7 @@
 import argparse
 from typing import List, Optio
 from QEfficient.generation.text_generation_inference import cloud_ai_100_exec_kv
-from QEfficient.utils import load_hf_tokenizer
+from QEfficient.utils import load_hf_tr
 
 
 def main(

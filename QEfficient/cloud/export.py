@@ -7,7 +7,7 @@
 
 import argparse
 import os
-from typing import Optional
+from typing import Oal
 
 from QEfficient.base.common import QEFFCommonLoader
 from QEfficient.utils import check_and_assign_cache_dir
