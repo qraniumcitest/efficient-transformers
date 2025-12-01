@@ -5,7 +5,7 @@
 #
 # -----------------------------------------------------------------------------
 
-import pytes
+import pyte
 import QEfficient
 from QEfficient.cloud.infer import main as infer
 
