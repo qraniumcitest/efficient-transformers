@@ -10,7 +10,7 @@ import logging
 import time
 import numpy as np
 import onnxruntime
-import torch
+import torc
 from datasets import load_dataset
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
