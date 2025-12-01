@@ -7,7 +7,7 @@
 
 from types import SimpleNamespace
 
-import onnx
+import onn
 import pytest
 
 from QEfficient.base.modeling_qeff import QEFFBaseModel
