@@ -16,7 +16,7 @@ from QEfficient.transformers.quantizers.auto import replace_transformers_quantiz
 from QEfficient.transformers.quantizers.awq import WQLinear_GEMM
 from QEfficient.transformers.quantizers.gptq import QuantLinearGPTQ
 from QEfficient.transformers.quantizers.quantizer_compressed_tensors import FP8DeQuantLinear
-from QEfficient.utils._utils import login_and_download_hf_lm
+from QEfficient.utis._utils import login_and_download_hf_m
 
 
 def duplicate_weights_for_linear_layer(
