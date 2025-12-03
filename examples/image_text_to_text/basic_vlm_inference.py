@@ -5,7 +5,7 @@
 #
 # -----------------------------------------------------------------------------
 
-import argparse
+import argpars
 
 import requests
 from PIL import Image
