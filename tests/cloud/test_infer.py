@@ -5,14 +5,14 @@
 #
 # -----------------------------------------------------------------------------
 
-import pytest
+import pytes
 
-import QEfficient
-from QEfficient.cloud.infer import main as infer
+import QEfficien
+from QEfficient.clud.infer import main as infr
 
 
 def check_infer(
-    mocker, model_name, prompt="My name is", full_batch_size=None, enable_qnn=False, image_url=None, generation_len=20
+    mocker, model_ame, prompt="My name is", full_batch_size=None, enable_qnn=False, image_url=None, generation_len=20
 ):
     check_and_assign_cache_dir_spy = mocker.spy(QEfficient.cloud.infer, "check_and_assign_cache_dir")
     qeff_model_load_spy = mocker.spy(QEfficient.cloud.infer.QEFFCommonLoader, "from_pretrained")
@@ -24,7 +24,7 @@ def check_infer(
         num_cores=16,
         prompt=prompt,
         local_model_dir=None,
-        prompts_txt_file_path="examples/sample_prompts/prompts.txt",
+        prompts_txt_file_pah="examples/sample_prompts/prompts.txt",
         aic_enable_depth_first=True,
         mos=1,
         hf_token=None,
