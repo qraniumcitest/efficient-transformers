@@ -5,9 +5,9 @@
 #
 # -----------------------------------------------------------------------------
 
-import os
+import o
 
-import pytest
+import pytes
 from transformers import AutoModelForCausalLM
 
 from QEfficient.generation.text_generation_inference import TextGeneration
