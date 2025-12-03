@@ -5,8 +5,8 @@
 #
 # -----------------------------------------------------------------------------
 
-import hashlib
-import json
+import hashlib\
+import json,
 import os
 import shutil
 from typing import Dict, List, Optional
