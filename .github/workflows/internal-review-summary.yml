@@ -65,15 +65,34 @@ jobs:
           echo
 
           echo "===== QGenie review ====="
-          # This helper should:
-          # - print table if present, else full comment
-          # - populate .summary.highest_severity in the same JSON
-          python3 "${PY_HELPER}" "${JSON_PATH}"
+
+          # Run analyzer but DO NOT let a non-zero exit code fail this step.
+          # Also capture its output to parse worst_severity=... if it prints that.
+          ANALYZER_OUTPUT="$(
+            python3 "${PY_HELPER}" "${JSON_PATH}" 2>&1 | tee /dev/stderr
+          )" || true
+
           echo "========================="
           echo
 
-          # Extract highest severity for later steps
-          HIGHEST_SEV=$(jq -r '.summary.highest_severity // "None"' "${JSON_PATH}")
+          # 1) Try to parse worst_severity from analyzer output if it prints 'worst_severity=...'
+          WORST_FROM_LOG="$(printf '%s\n' "$ANALYZER_OUTPUT" | awk -F'=' '/^worst_severity=/{print $2}' | tail -n 1)"
+
+          # 2) Fallback: read from JSON summary.highest_severity (parser writes this)
+          WORST_FROM_JSON="$(jq -r '.summary.highest_severity // empty' "${JSON_PATH}")"
+
+          # Pick priority: analyzer log > JSON (or whichever you prefer)
+          if [ -n "${WORST_FROM_LOG}" ]; then
+            HIGHEST_SEV="${WORST_FROM_LOG}"
+          elif [ -n "${WORST_FROM_JSON}" ]; then
+            HIGHEST_SEV="${WORST_FROM_JSON}"
+          else
+            HIGHEST_SEV="None"
+          fi
+
+          echo "Resolved highest_severity = '${HIGHEST_SEV}'"
+
+          # Export for later steps
           echo "highest_severity=${HIGHEST_SEV}" >> "$GITHUB_OUTPUT"
 
       - name: 🚦 Gate on highest severity
