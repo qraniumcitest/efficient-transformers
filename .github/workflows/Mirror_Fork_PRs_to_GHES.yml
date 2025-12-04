@@ -21,6 +21,8 @@ jobs:
       GHES_REPO: efficient-transformers
       FORK_OWNER: "qraniumcitest"
       FORK_REPO: "efficient-transformers"
+      # NOTE: shadow-cat preview enables draft PR APIs on older GHES versions
+      GH_ACCEPT: "application/vnd.github+json, application/vnd.github.shadow-cat-preview+json"
 
     steps:
       - name: Exit if running in internal repo
@@ -44,9 +46,7 @@ jobs:
           echo "GHES_BASE_URL=${GHES_BASE_URL}"
           echo "GHES_OWNER    =${GHES_OWNER}"
           echo "GHES_REPO     =${GHES_REPO}"
-          # DNS check
           nslookup github.qualcomm.com || (echo "DNS lookup Failed. Connect VPN then re-run"; exit 1)
-          # HTTPS reachability
           curl -I --max-time 10 "https://github.qualcomm.com" || (echo "Cannot reach GHES over HTTPS. Connect VPN then re-run"; exit 1)
 
       - name: Checkout PR head
@@ -114,7 +114,9 @@ jobs:
             "$BODY_ESCAPED")
 
           API="${{ env.GHES_BASE_URL }}/api/v3/repos/${{ env.GHES_OWNER }}/${{ env.GHES_REPO }}/pulls"
-          EXISTING=$(curl -s -H "Authorization: token ${GHES_PAT}" -H "Accept: application/vnd.github+json" \
+          EXISTING=$(curl -s \
+                      -H "Authorization: token ${GHES_PAT}" \
+                      -H "Accept: ${GH_ACCEPT}" \
                       "${API}?state=open&head=${GHES_OWNER}:${BRANCH}" | jq -r '.[0].number // empty')
 
           # Normalize upstream draft flag to a JSON boolean
@@ -122,14 +124,17 @@ jobs:
 
           if [ -n "$EXISTING" ]; then
             echo "Updating GHES PR #${EXISTING} (title/body only)"
-            curl -s -H "Authorization: token ${GHES_PAT}" -H "Accept: application/vnd.github+json" \
-              -X PATCH "${API}/${EXISTING}" \
+            curl -s -X PATCH \
+              -H "Authorization: token ${GHES_PAT}" \
+              -H "Accept: ${GH_ACCEPT}" \
+              "${API}/${EXISTING}" \
               -d "$(jq -n --arg t "[Fork PR #${PR_NUM}] ${TITLE}" --arg b "$PR_BODY" '{title:$t, body:$b}')" > /dev/null
             echo "existing_pr=${EXISTING}" >> "$GITHUB_OUTPUT"
           else
             echo "Creating GHES PR (draft=${DRAFT_JSON})"
             RESP=$(curl -s -X POST \
-              -H "Authorization: token ${GHES_PAT}" -H "Accept: application/vnd.github+json" \
+              -H "Authorization: token ${GHES_PAT}" \
+              -H "Accept: ${GH_ACCEPT}" \
               "${API}" \
               -d "$(jq -n \
                     --arg t "[Fork PR #${PR_NUM}] ${TITLE}" \
@@ -142,7 +147,7 @@ jobs:
             echo "existing_pr=${CREATED_NUM}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Align GHES PR draft/ready state to upstream
+      - name: Align GHES PR draft/ready state to upstream (requires preview header)
         if: github.event.action != 'closed'
         env:
           GHES_PAT: ${{ secrets.GHES_PAT }}
@@ -161,22 +166,34 @@ jobs:
             echo "Converting GHES PR #${PR_ID} to DRAFT (if not already)"
             curl -s -X POST \
               -H "Authorization: token ${GHES_PAT}" \
-              -H "Accept: application/vnd.github+json" \
+              -H "Accept: ${GH_ACCEPT}" \
               "${API_BASE}/${PR_ID}/convert_to_draft" > /dev/null || true
           else
             echo "Marking GHES PR #${PR_ID} READY FOR REVIEW (if not already)"
             curl -s -X POST \
               -H "Authorization: token ${GHES_PAT}" \
-              -H "Accept: application/vnd.github+json" \
+              -H "Accept: ${GH_ACCEPT}" \
               "${API_BASE}/${PR_ID}/ready_for_review" > /dev/null || true
           fi
+
+      - name: Verify GHES PR draft state (for logs)
+        env:
+          GHES_PAT: ${{ secrets.GHES_PAT }}
+        run: |
+          set -euo pipefail
+          PR_ID="${{ steps.ensure_pr.outputs.existing_pr }}"
+          if [ -z "$PR_ID" ]; then
+            echo "No GHES PR number resolved; skipping verification."
+            exit 0
+          fi
+          API="${{ env.GHES_BASE_URL }}/api/v3/repos/${{ env.GHES_OWNER }}/${{ env.GHES_REPO }}/pulls/${PR_ID}"
+          RESP=$(curl -s -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" "${API}")
+          DRAFT=$(echo "$RESP" | jq -r '.draft // "UNKNOWN"')
+          echo "GHES PR #${PR_ID} draft=${DRAFT}"
 
       - name: Close up GHES branches for closed upstream PRs
         if: github.event.action == 'closed'
         env:
-          GHES_BASE_URL: https://github.qualcomm.com
-          GHES_OWNER: qranium
-          GHES_REPO: efficient-transformers
           GHES_PAT:  ${{ secrets.GHES_PAT  }}
         run: |
           set -euo pipefail
@@ -184,8 +201,7 @@ jobs:
           BRANCH="fork-pr-${PR_NUM}"
           API="${GHES_BASE_URL}/api/v3/repos/${GHES_OWNER}/${GHES_REPO}"
           echo "Looking for open GHES PR with head=${GHES_OWNER}:${BRANCH}"
-          RESP="$(curl -sS -H "Authorization: token ${GHES_PAT}" \
-                    -H "Accept: application/vnd.github+json" \
+          RESP="$(curl -sS -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
                     "${API}/pulls?state=open&head=${GHES_OWNER}:${BRANCH}" \
                     -w "\n%{http_code}")"
           HTTP_CODE="$(printf '%s\n' "$RESP" | tail -n1)"
@@ -201,7 +217,7 @@ jobs:
             echo "Closing GHES PR #$PR_ID"
             curl -sS -X PATCH \
               -H "Authorization: token ${GHES_PAT}" \
-              -H "Accept: application/vnd.github+json" \
+              -H "Accept: ${GH_ACCEPT}" \
               "${API}/pulls/${PR_ID}" \
               -d '{"state":"closed"}' > /dev/null || true
           else
@@ -210,5 +226,5 @@ jobs:
           echo "Deleting branch ${BRANCH} on GHES (idempotent)"
           curl -sS -X DELETE \
             -H "Authorization: token ${GHES_PAT}" \
-            -H "Accept: application/vnd.github+json" \
+            -H "Accept: ${GH_ACCEPT}" \
             "${API}/git/refs/heads/${BRANCH}" > /dev/null || true
