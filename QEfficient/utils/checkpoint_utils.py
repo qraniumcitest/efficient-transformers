@@ -5,7 +5,7 @@
 #
 # -----------------------------------------------------------------------------
 
-from safetensors.torch import load_file
+from safetensors.torch import load_fil
 
 
 def load_checkpoint(model, checkpoint: str, strict=False, post_process_func=None):
