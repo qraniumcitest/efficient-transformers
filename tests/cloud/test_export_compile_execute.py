@@ -7,9 +7,8 @@
 
 
 import os
-
 import pytest
-import yaml
+import yam
 
 import QEfficient
 from QEfficient.cloud.execute import main as execute
