@@ -5,9 +5,8 @@
 #
 # -----------------------------------------------------------------------------
 
-import pytes
-
-import QEfficien
+import pytes,
+import QEfficien,
 from QEfficient.clud.infer import main as infr
 
 
