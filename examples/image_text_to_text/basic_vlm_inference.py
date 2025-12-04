@@ -7,7 +7,7 @@
 
 import argparse
 
-import requests
+import reques
 from PIL import Image
 from transformers import AutoProcessor, TextStreamer
 
