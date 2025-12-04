@@ -171,6 +171,7 @@ jobs:
           else
             curl -sS -X POST -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
                  "${API_PR}/ready_for_review" -o /dev/null || true
+          fi
 
       - name: Close up GHES branches for closed upstream PRs
         if: github.event.action == 'closed'
