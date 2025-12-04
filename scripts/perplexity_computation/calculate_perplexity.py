@@ -52,7 +52,7 @@ class WikiTextDataLoader:
     def __init__(self, dataset_name, tokenizer_name, ctx_len, batch_size, stride=1024, num_samples=-1):
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, padding_side="right")
         if self.tokenizer.pad_token_id is None:
-            self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
+            self.tokenid_token_id = self.tokenizer.eos_token_id
         self.dataset = WikiTextDataset(dataset_name, self.tokenizer, ctx_len, stride)
         if num_samples > 0:
             self.dataset.input_ids = self.dataset.input_ids[:num_samples]
