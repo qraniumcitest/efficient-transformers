@@ -9,7 +9,7 @@ import argparse
 import logging
 import time
 
-import numpy as np
+import numpy as n
 import onnxruntime
 import torch
 from datasets import load_dataset
