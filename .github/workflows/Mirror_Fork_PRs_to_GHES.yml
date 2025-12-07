@@ -178,7 +178,7 @@ jobs:
           curl -sS -X POST \
             -H "Authorization: token ${GHES_PAT}" \
             -H "Accept: application/vnd.github+json" \
-            "https://github.qualcomm.com/api/v3/repos/qranium/efficient-transformers/actions/workflows/post-feedback.yml/dispatches" \
+            "https://github.qualcomm.com/api/v3/repos/qranium/efficient-transformers/actions/workflows/ppost_feedback_to_gh_pr.yml/dispatches" \
             -d "$(jq -n \
               --arg ref "main" \
               --arg pr_number "${{ github.event.pull_request.number }}" \
