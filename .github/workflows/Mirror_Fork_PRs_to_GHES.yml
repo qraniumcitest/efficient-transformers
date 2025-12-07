@@ -1,4 +1,3 @@
-
 name: Mirror Fork PRs to GHES
 
 on:
@@ -8,7 +7,6 @@ on:
     branches: ["main"]
   workflow_dispatch:
 
-# Per-PR concurrency avoids cross-PR contention
 concurrency:
   group: fork-pr-mirror-${{ github.event.pull_request.number }}
   cancel-in-progress: false
@@ -22,7 +20,6 @@ jobs:
       GHES_REPO: efficient-transformers
       FORK_OWNER: "qraniumcitest"
       FORK_REPO: "efficient-transformers"
-      # Preview headers – safe on GHES for PR endpoints
       GH_ACCEPT: "application/vnd.github+json, application/vnd.github.shadow-cat-preview+json"
 
     steps:
@@ -42,7 +39,7 @@ jobs:
           echo "Head sha    : ${{ github.event.pull_request.head.sha }}"
 
       - name: Preflight - verify GHES env and connectivity
-        run: | 
+        run: |
           set -e
           echo "GHES_BASE_URL=${GHES_BASE_URL}"
           echo "GHES_OWNER    =${GHES_OWNER}"
@@ -67,7 +64,7 @@ jobs:
         if: github.event.action != 'closed'
         env:
           GHES_USER: ${{ secrets.GHES_USER }}
-          GHES_PAT:  ${{ secrets.GHES_PAT  }}
+          GHES_PAT:  ${{ secrets.GHES_PAT }}
         run: |
           set -e
           git remote add ghes "${GHES_BASE_URL}/${GHES_OWNER}/${GHES_REPO}.git" || true
@@ -101,7 +98,6 @@ jobs:
           DRAFT_FLAG="${{ github.event.pull_request.draft }}"
           BODY_ESCAPED="$(echo "$BODY_RAW" | tr '\n' ' ' | tr '\r' ' ')"
 
-          # --- Include upstream draft marker in the mirrored PR body ---
           META=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
                 '[Mirror Metadata]' \
                 "Original-PR-Repo: ${{ env.FORK_OWNER }}/${{ env.FORK_REPO }}" \
@@ -122,11 +118,10 @@ jobs:
                       -H "Accept: ${GH_ACCEPT}" \
                       "${API}?state=open&head=${GHES_OWNER}:${BRANCH}" | jq -r '.[0].number // empty')
 
-          # Normalize upstream draft flag to a JSON boolean for create
           if [ "$DRAFT_FLAG" = "true" ]; then DRAFT_JSON=true; else DRAFT_JSON=false; fi
 
           if [ -n "$EXISTING" ]; then
-            echo "Updating GHES PR #${EXISTING} (title/body refresh with marker)"
+            echo "Updating GHES PR #${EXISTING}"
             curl -s -X PATCH \
               -H "Authorization: token ${GHES_PAT}" \
               -H "Accept: ${GH_ACCEPT}" \
@@ -134,7 +129,7 @@ jobs:
               -d "$(jq -n --arg t "[Fork PR #${PR_NUM}] ${TITLE}" --arg b "$PR_BODY" '{title:$t, body:$b}')" > /dev/null
             echo "existing_pr=${EXISTING}" >> "$GITHUB_OUTPUT"
           else
-            echo "Creating GHES PR (draft=${DRAFT_JSON}, body includes Upstream-Draft:${DRAFT_FLAG})"
+            echo "Creating GHES PR (draft=${DRAFT_JSON})"
             RESP=$(curl -s -X POST \
               -H "Authorization: token ${GHES_PAT}" \
               -H "Accept: ${GH_ACCEPT}" \
@@ -150,8 +145,6 @@ jobs:
             echo "existing_pr=${CREATED_NUM}" >> "$GITHUB_OUTPUT"
           fi
 
-      # (Optional) Align GHES PR draft/ready state using preview endpoints.
-      # If GHES ignores draft, the marker still controls internal Jenkins trigger.
       - name: Align GHES PR state to upstream (best-effort)
         if: github.event.action != 'closed'
         env:
@@ -173,10 +166,31 @@ jobs:
                  "${API_PR}/ready_for_review" -o /dev/null || true
           fi
 
+      # ✅ Dispatch internal workflow for Jenkins & PR sync
+      - name: Dispatch internal workflow
+        if: github.event.action != 'closed'
+        env:
+          INTERNAL_PAT: ${{ secrets.INTERNAL_REPO_PAT }} # PAT with repo + workflow scopes on GHES
+        run: |
+          set -euo pipefail
+          echo "Dispatching internal workflow for PR=${{ github.event.pull_request.number }} SHA=${{ github.event.pull_request.head.sha }} Draft=${{ github.event.pull_request.draft }}"
+
+          curl -sS -X POST \
+            -H "Authorization: token ${INTERNAL_PAT}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://github.qualcomm.com/api/v3/repos/qranium/efficient-transformers/actions/workflows/post-feedback.yml/dispatches" \
+            -d "$(jq -n \
+              --arg ref "main" \
+              --arg pr_number "${{ github.event.pull_request.number }}" \
+              --arg orig_repo "${{ github.repository }}" \
+              --arg orig_sha "${{ github.event.pull_request.head.sha }}" \
+              --arg draft "${{ github.event.pull_request.draft }}" \
+              '{ref:$ref, inputs:{pr_number:$pr_number, orig_repo:$orig_repo, orig_sha:$orig_sha, draft:$draft}}')"
+
       - name: Close up GHES branches for closed upstream PRs
         if: github.event.action == 'closed'
         env:
-          GHES_PAT:  ${{ secrets.GHES_PAT  }}
+          GHES_PAT: ${{ secrets.GHES_PAT }}
         run: |
           set -euo pipefail
           PR_NUM="${{ github.event.pull_request.number }}"
