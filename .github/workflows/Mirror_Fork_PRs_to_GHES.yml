@@ -170,13 +170,13 @@ jobs:
       - name: Dispatch internal workflow
         if: github.event.action != 'closed'
         env:
-          INTERNAL_PAT: ${{ secrets.INTERNAL_REPO_PAT }} # PAT with repo + workflow scopes on GHES
+          GHES_PAT: ${{ secrets.GHES_PAT }} # PAT with repo + workflow scopes on GHES
         run: |
           set -euo pipefail
           echo "Dispatching internal workflow for PR=${{ github.event.pull_request.number }} SHA=${{ github.event.pull_request.head.sha }} Draft=${{ github.event.pull_request.draft }}"
 
           curl -sS -X POST \
-            -H "Authorization: token ${INTERNAL_PAT}" \
+            -H "Authorization: token ${GHES_PAT}" \
             -H "Accept: application/vnd.github+json" \
             "https://github.qualcomm.com/api/v3/repos/qranium/efficient-transformers/actions/workflows/post-feedback.yml/dispatches" \
             -d "$(jq -n \
