@@ -5,7 +5,7 @@
 #
 # -----------------------------------------------------------------------------
 
-import argparse
+import argpars
 import QEfficient
 
 if __name__ == "__main__":
