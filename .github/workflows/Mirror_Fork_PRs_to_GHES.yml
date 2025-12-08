@@ -82,7 +82,7 @@ jobs:
           git push ghes "HEAD:refs/heads/${BRANCH}" --force
           echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
 
-      - name: Create/Update GHES PR (write metadata + marker + freshness)
+      - name: Create/Update GHES PR (metadata + marker + freshness)
         if: github.event.action != 'closed'
         id: ensure_pr
         env:
@@ -108,7 +108,7 @@ jobs:
                 "Original-Head-Branch: ${HEAD_REF}" \
                 "Upstream-Draft:${DRAFT_FLAG}")
 
-          FRESHNESS="Mirror-Updated-At: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"  # ensures GHES emits `edited`
+          FRESHNESS="Mirror-Updated-At: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"  # guarantees `edited`
 
           PR_BODY=$(printf '%s\n\n%s\n%s\n\n%s\n' \
             "$URL" \
@@ -125,7 +125,7 @@ jobs:
           if [ "$DRAFT_FLAG" = "true" ]; then DRAFT_JSON=true; else DRAFT_JSON=false; fi
 
           if [ -n "$EXISTING" ]; then
-            echo "Updating GHES PR #${EXISTING} (title/body refresh + marker + freshness)"
+            echo "Updating GHES PR #${EXISTING}"
             curl -s -X PATCH \
               -H "Authorization: token ${GHES_PAT}" \
               -H "Accept: ${GH_ACCEPT}" \
@@ -133,7 +133,7 @@ jobs:
               -d "$(jq -n --arg t "[Fork PR #${PR_NUM}] ${TITLE}" --arg b "$PR_BODY" '{title:$t, body:$b}')" > /dev/null
             echo "existing_pr=${EXISTING}" >> "$GITHUB_OUTPUT"
           else
-            echo "Creating GHES PR (draft=${DRAFT_JSON}, body includes metadata/marker/freshness)"
+            echo "Creating GHES PR (draft=${DRAFT_JSON})"
             RESP=$(curl -s -X POST \
               -H "Authorization: token ${GHES_PAT}" \
               -H "Accept: ${GH_ACCEPT}" \
@@ -149,8 +149,7 @@ jobs:
             echo "existing_pr=${CREATED_NUM}" >> "$GITHUB_OUTPUT"
           fi
 
-      # Force GHES to emit the correct state event (no commit/body change needed)
-      - name: Align GHES PR state to upstream (force event emission)
+      - name: Align GHES PR state to upstream (best-effort)
         if: github.event.action != 'closed'
         env:
           GHES_PAT: ${{ secrets.GHES_PAT }}
@@ -161,7 +160,7 @@ jobs:
           DRAFT_FLAG="${{ github.event.pull_request.draft }}"
           PR_ID="${{ steps.ensure_pr.outputs.existing_pr }}"
 
-          # Resolve PR_ID with small retry (GHES indexing can lag)
+          # Resolve PR_ID with small retry (indexing lag)
           ATTEMPTS=0
           while [ -z "${PR_ID}" ] && [ $ATTEMPTS -lt 3 ]; do
             sleep 2
@@ -181,19 +180,60 @@ jobs:
           API_PR="${API_BASE}/pulls/${PR_ID}"
 
           if [ "$DRAFT_FLAG" = "true" ]; then
-            echo "Upstream=DRAFT → nudge GHES (ready→draft) to force event"
+            echo "Upstream=DRAFT → nudge GHES (ready→draft)"
             curl -sS -X POST -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
                  "${API_PR}/ready_for_review" -o /dev/null || true
             sleep 1
             curl -sS -X POST -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
                  "${API_PR}/convert_to_draft" -o /dev/null || true
           else
-            echo "Upstream=READY → nudge GHES (draft→ready) to force event"
+            echo "Upstream=READY → nudge GHES (draft→ready)"
             curl -sS -X POST -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
                  "${API_PR}/convert_to_draft" -o /dev/null || true
             sleep 1
             curl -sS -X POST -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
                  "${API_PR}/ready_for_review" -o /dev/null || true
+          fi
+
+      - name: Ensure labels exist (mirror:ready, mirror:draft)
+        if: github.event.action != 'closed'
+        env:
+          GHES_PAT: ${{ secrets.GHES_PAT }}
+        run: |
+          set -euo pipefail
+          API="${{ env.GHES_BASE_URL }}/api/v3/repos/${{ env.GHES_OWNER }}/${{ env.GHES_REPO }}"
+          have_label () { curl -sS -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" "${API}/labels" | jq -r '.[].name' | grep -qx "$1"; }
+          create_label () { curl -sS -X POST -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" "${API}/labels" -d "{\"name\":\"$1\",\"color\":\"a3f7bf\",\"description\":\"$2\"}"; }
+          have_label "mirror:ready" || create_label "mirror:ready" "Upstream PR is ready-for-review"
+          have_label "mirror:draft" || create_label "mirror:draft" "Upstream PR is draft"
+
+      - name: Apply/remove labels based on upstream state
+        if: github.event.action != 'closed'
+        env:
+          GHES_PAT: ${{ secrets.GHES_PAT }}
+        run: |
+          set -euo pipefail
+          API="${{ env.GHES_BASE_URL }}/api/v3/repos/${{ env.GHES_OWNER }}/${{ env.GHES_REPO }}"
+          PR_ID="${{ steps.ensure_pr.outputs.existing_pr }}"
+          DRAFT_FLAG="${{ github.event.pull_request.draft }}"
+
+          if [ -z "${PR_ID}" ]; then
+            echo "No GHES PR ID to label; skipping."
+            exit 0
+          fi
+
+          # Helper: add/remove label
+          add_label () { curl -sS -X POST -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" "${API}/issues/${PR_ID}/labels" -d "{\"labels\":[\"$1\"]}" > /dev/null; }
+          remove_label () { curl -sS -X DELETE -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" "${API}/issues/${PR_ID}/labels/$1" > /dev/null || true; }
+
+          if [ "${DRAFT_FLAG}" = "true" ]; then
+            echo "Upstream is DRAFT → set mirror:draft, remove mirror:ready"
+            add_label "mirror:draft"
+            remove_label "mirror:ready"
+          else
+            echo "Upstream is READY → set mirror:ready, remove mirror:draft"
+            add_label "mirror:ready"
+            remove_label "mirror:draft"
           fi
 
       - name: Close up GHES branches for closed upstream PRs
