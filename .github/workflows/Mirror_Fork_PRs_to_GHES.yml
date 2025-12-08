@@ -2,9 +2,11 @@ name: Mirror Fork PRs to GHES
 
 on:
   pull_request:
+    # PR created, draft→ready transition, commits, reopen, close
     types: [opened, ready_for_review, synchronize, reopened, closed]
     branches: ["main"]
 
+# Per-PR concurrency avoids cross-PR contention
 concurrency:
   group: fork-pr-mirror-${{ github.event.pull_request.number }}
   cancel-in-progress: false
@@ -18,6 +20,7 @@ jobs:
       GHES_REPO: efficient-transformers
       FORK_OWNER: "qraniumcitest"
       FORK_REPO: "efficient-transformers"
+      # Preview headers required for draft/ready endpoints on GHES
       GH_ACCEPT: "application/vnd.github+json, application/vnd.github.shadow-cat-preview+json"
 
     steps:
@@ -105,7 +108,8 @@ jobs:
                 "Original-Head-Branch: ${HEAD_REF}" \
                 "Upstream-Draft:${DRAFT_FLAG}")
 
-          FRESHNESS="Mirror-Updated-At: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"  # ensures `edited`
+          # Freshness line guarantees GHES emits `edited` even if state doesn't flip
+          FRESHNESS="Mirror-Updated-At: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 
           PR_BODY=$(printf '%s\n\n%s\n%s\n\n%s\n' \
             "$URL" \
@@ -122,7 +126,7 @@ jobs:
           if [ "$DRAFT_FLAG" = "true" ]; then DRAFT_JSON=true; else DRAFT_JSON=false; fi
 
           if [ -n "$EXISTING" ]; then
-            echo "Updating GHES PR #${EXISTING}"
+            echo "Updating GHES PR #${EXISTING} (refresh title/body + marker + freshness)"
             curl -s -X PATCH \
               -H "Authorization: token ${GHES_PAT}" \
               -H "Accept: ${GH_ACCEPT}" \
@@ -146,6 +150,7 @@ jobs:
             echo "existing_pr=${CREATED_NUM}" >> "$GITHUB_OUTPUT"
           fi
 
+      # Best-effort: try to flip GHES PR state (not used for triggering)
       - name: Align GHES PR state to upstream (best-effort)
         if: github.event.action != 'closed'
         env:
@@ -191,69 +196,6 @@ jobs:
                  "${API_PR}/ready_for_review" -o /dev/null || true
           fi
 
-      - name: Ensure labels exist (mirror:ready, mirror:draft) - robust
-        if: github.event.action != 'closed'
-        env:
-          GHES_PAT: ${{ secrets.GHES_PAT }}
-        run: |
-          set -euo pipefail
-          API="${{ env.GHES_BASE_URL }}/api/v3/repos/${{ env.GHES_OWNER }}/${{ env.GHES_REPO }}"
-
-          RESP="$(curl -sS -w '\n%{http_code}' -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" "${API}/labels")"
-          HTTP="$(printf '%s\n' "$RESP" | tail -n1)"
-          JSON="$(printf '%s\n' "$RESP" | sed '$d')"
-
-          if [ "$HTTP" != "200" ]; then
-            CREATE_READY=true
-            CREATE_DRAFT=true
-          else
-            IS_ARRAY="$(printf '%s' "$JSON" | jq -e 'type=="array"' >/dev/null 2>&1 && echo yes || echo no)"
-            if [ "$IS_ARRAY" = "yes" ]; then
-              READY_IDX="$(printf '%s' "$JSON" | jq -r 'map(.name)|index("mirror:ready")')"
-              DRAFT_IDX="$(printf '%s' "$JSON" | jq -r 'map(.name)|index("mirror:draft")')"
-              [ -z "$READY_IDX" ] && CREATE_READY=true || CREATE_READY=false
-              [ -z "$DRAFT_IDX" ] && CREATE_DRAFT=true || CREATE_DRAFT=false
-            else
-              CREATE_READY=true
-              CREATE_DRAFT=true
-            fi
-          fi
-
-          if [ "${CREATE_READY}" = "true" ]; then
-            curl -sS -X POST -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
-                 "${API}/labels" -d '{"name":"mirror:ready","color":"a3f7bf","description":"Upstream PR is ready-for-review"}' > /dev/null || true
-          fi
-          if [ "${CREATE_DRAFT}" = "true" ]; then
-            curl -sS -X POST -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
-                 "${API}/labels" -d '{"name":"mirror:draft","color":"ffb3ba","description":"Upstream PR is draft"}' > /dev/null || true
-          fi
-
-      - name: Apply/remove labels based on upstream state - robust
-        if: github.event.action != 'closed'
-        env:
-          GHES_PAT: ${{ secrets.GHES_PAT }}
-        run: |
-          set -euo pipefail
-          API="${{ env.GHES_BASE_URL }}/api/v3/repos/${{ env.GHES_OWNER }}/${{ env.GHES_REPO }}"
-          PR_ID="${{ steps.ensure_pr.outputs.existing_pr }}"
-          DRAFT_FLAG="${{ github.event.pull_request.draft }}"
-
-          if [ -z "${PR_ID}" ]; then
-            echo "No GHES PR ID to label; skipping."
-            exit 0
-          fi
-
-          add_label () { curl -sS -X POST -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" "${API}/issues/${PR_ID}/labels" -d "{\"labels\":[\"$1\"]}" > /dev/null || true; }
-          remove_label () { curl -sS -X DELETE -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" "${API}/issues/${PR_ID}/labels/$1" > /dev/null || true; }
-
-          if [ "${DRAFT_FLAG}" = "true" ]; then
-            add_label "mirror:draft"
-            remove_label "mirror:ready"
-          else
-            add_label "mirror:ready"
-            remove_label "mirror:draft"
-          fi
-
       - name: Close up GHES branches for closed upstream PRs
         if: github.event.action == 'closed'
         env:
@@ -270,13 +212,18 @@ jobs:
           if [ "${HTTP_CODE}" = "200" ]; then
             PR_ID="$(printf '%s' "$JSON" | jq -r 'if type=="array" and length>0 then .[0].number else empty end')"
             if [ -n "$PR_ID" ]; then
+              echo "Closing GHES PR #$PR_ID"
               curl -sS -X PATCH \
                 -H "Authorization: token ${GHES_PAT}" \
                 -H "Accept: ${GH_ACCEPT}" \
                 "${API}/pulls/${PR_ID}" \
                 -d '{"state":"closed"}' > /dev/null || true
             fi
+          else
+            echo "Pulls query failed HTTP=${HTTP_CODE}; payload:"
+            echo "$JSON"
           fi
+          echo "Deleting branch ${BRANCH} on GHES (idempotent)"
           curl -sS -X DELETE \
             -H "Authorization: token ${GHES_PAT}" \
             -H "Accept: ${GH_ACCEPT}" \
