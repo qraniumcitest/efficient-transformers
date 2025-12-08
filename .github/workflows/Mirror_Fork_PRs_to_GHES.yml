@@ -82,7 +82,7 @@ jobs:
           git push ghes "HEAD:refs/heads/${BRANCH}" --force
           echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
 
-      - name: Create/Update GHES PR (write Upstream-Draft marker)
+      - name: Create/Update GHES PR (write metadata + marker + freshness)
         if: github.event.action != 'closed'
         id: ensure_pr
         env:
@@ -99,7 +99,6 @@ jobs:
           DRAFT_FLAG="${{ github.event.pull_request.draft }}"
           BODY_ESCAPED="$(echo "$BODY_RAW" | tr '\n' ' ' | tr '\r' ' ')"
 
-          # Mirror metadata + definitive upstream draft marker
           META=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
                 '[Mirror Metadata]' \
                 "Original-PR-Repo: ${{ env.FORK_OWNER }}/${{ env.FORK_REPO }}" \
@@ -109,9 +108,12 @@ jobs:
                 "Original-Head-Branch: ${HEAD_REF}" \
                 "Upstream-Draft:${DRAFT_FLAG}")
 
-          PR_BODY=$(printf '%s\n\n%s\n\n%s\n' \
+          FRESHNESS="Mirror-Updated-At: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"  # ensures GHES emits `edited`
+
+          PR_BODY=$(printf '%s\n\n%s\n%s\n\n%s\n' \
             "$URL" \
             "$META" \
+            "$FRESHNESS" \
             "$BODY_ESCAPED")
 
           API="${{ env.GHES_BASE_URL }}/api/v3/repos/${{ env.GHES_OWNER }}/${{ env.GHES_REPO }}/pulls"
@@ -120,11 +122,10 @@ jobs:
                       -H "Accept: ${GH_ACCEPT}" \
                       "${API}?state=open&head=${GHES_OWNER}:${BRANCH}" | jq -r '.[0].number // empty')
 
-          # Normalize upstream draft flag to JSON boolean for create
           if [ "$DRAFT_FLAG" = "true" ]; then DRAFT_JSON=true; else DRAFT_JSON=false; fi
 
           if [ -n "$EXISTING" ]; then
-            echo "Updating GHES PR #${EXISTING} (title/body refresh with marker)"
+            echo "Updating GHES PR #${EXISTING} (title/body refresh + marker + freshness)"
             curl -s -X PATCH \
               -H "Authorization: token ${GHES_PAT}" \
               -H "Accept: ${GH_ACCEPT}" \
@@ -132,7 +133,7 @@ jobs:
               -d "$(jq -n --arg t "[Fork PR #${PR_NUM}] ${TITLE}" --arg b "$PR_BODY" '{title:$t, body:$b}')" > /dev/null
             echo "existing_pr=${EXISTING}" >> "$GITHUB_OUTPUT"
           else
-            echo "Creating GHES PR (draft=${DRAFT_JSON}, body includes Upstream-Draft:${DRAFT_FLAG})"
+            echo "Creating GHES PR (draft=${DRAFT_JSON}, body includes metadata/marker/freshness)"
             RESP=$(curl -s -X POST \
               -H "Authorization: token ${GHES_PAT}" \
               -H "Accept: ${GH_ACCEPT}" \
