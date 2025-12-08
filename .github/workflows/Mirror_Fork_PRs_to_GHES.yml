@@ -184,3 +184,46 @@ jobs:
             curl -sS -X POST -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
                  "${API_PR}/ready_for_review" -o /dev/null || true
             sleep 1
+            curl -sS -X POST -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
+                 "${API_PR}/convert_to_draft" -o /dev/null || true
+          else
+            echo "Upstream=READY → nudge GHES (draft→ready) to force event"
+            curl -sS -X POST -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
+                 "${API_PR}/convert_to_draft" -o /dev/null || true
+            sleep 1
+            curl -sS -X POST -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
+                 "${API_PR}/ready_for_review" -o /dev/null || true
+          fi
+
+      - name: Close up GHES branches for closed upstream PRs
+        if: github.event.action == 'closed'
+        env:
+          GHES_PAT:  ${{ secrets.GHES_PAT  }}
+        run: |
+          set -euo pipefail
+          PR_NUM="${{ github.event.pull_request.number }}"
+          BRANCH="fork-pr-${PR_NUM}"
+          API="${GHES_BASE_URL}/api/v3/repos/${GHES_OWNER}/${GHES_REPO}"
+          RESP="$(curl -sS -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
+                    "${API}/pulls?state=open&head=${GHES_OWNER}:${BRANCH}" -w "\n%{http_code}")"
+          HTTP_CODE="$(printf '%s\n' "$RESP" | tail -n1)"
+          JSON="$(printf '%s\n' "$RESP" | sed '$d')"
+          if [ "${HTTP_CODE}" = "200" ]; then
+            PR_ID="$(printf '%s' "$JSON" | jq -r 'if type=="array" and length>0 then .[0].number else empty end')"
+            if [ -n "$PR_ID" ]; then
+              echo "Closing GHES PR #$PR_ID"
+              curl -sS -X PATCH \
+                -H "Authorization: token ${GHES_PAT}" \
+                -H "Accept: ${GH_ACCEPT}" \
+                "${API}/pulls/${PR_ID}" \
+                -d '{"state":"closed"}' > /dev/null || true
+            fi
+          else
+            echo "Pulls query failed HTTP=${HTTP_CODE}; payload:"
+            echo "$JSON"
+          fi
+          echo "Deleting branch ${BRANCH} on GHES (idempotent)"
+          curl -sS -X DELETE \
+            -H "Authorization: token ${GHES_PAT}" \
+            -H "Accept: ${GH_ACCEPT}" \
+            "${API}/git/refs/heads/${BRANCH}" > /dev/null || true
