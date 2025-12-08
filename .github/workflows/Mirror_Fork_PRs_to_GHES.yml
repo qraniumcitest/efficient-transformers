@@ -1,4 +1,3 @@
-
 name: Mirror Fork PRs to GHES
 
 on:
@@ -21,7 +20,7 @@ jobs:
       GHES_REPO: efficient-transformers
       FORK_OWNER: "qraniumcitest"
       FORK_REPO: "efficient-transformers"
-      # Preview headers – safe on GHES for PR endpoints
+      # Preview headers required for draft/ready endpoints on GHES
       GH_ACCEPT: "application/vnd.github+json, application/vnd.github.shadow-cat-preview+json"
 
     steps:
@@ -46,7 +45,7 @@ jobs:
           echo "GHES_BASE_URL=${GHES_BASE_URL}"
           echo "GHES_OWNER    =${GHES_OWNER}"
           echo "GHES_REPO     =${GHES_REPO}"
-          nslookup github.qualcomm.com || (echo "DNS lookup Failed. Connect VPN then re-run"; exit 1)
+          nslookup github.qualcomm.com || (echo "DNS lookup failed. Connect VPN then re-run"; exit 1)
           curl -I --max-time 10 "https://github.qualcomm.com" || (echo "Cannot reach GHES over HTTPS. Connect VPN then re-run"; exit 1)
 
       - name: Checkout PR head
@@ -100,7 +99,7 @@ jobs:
           DRAFT_FLAG="${{ github.event.pull_request.draft }}"
           BODY_ESCAPED="$(echo "$BODY_RAW" | tr '\n' ' ' | tr '\r' ' ')"
 
-          # Include upstream draft marker in the mirrored PR body
+          # Mirror metadata + definitive upstream draft marker
           META=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
                 '[Mirror Metadata]' \
                 "Original-PR-Repo: ${{ env.FORK_OWNER }}/${{ env.FORK_REPO }}" \
@@ -149,23 +148,49 @@ jobs:
             echo "existing_pr=${CREATED_NUM}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Align GHES PR state to upstream (best-effort)
+      # Force GHES to emit the correct state event (no commit/body change needed)
+      - name: Align GHES PR state to upstream (force event emission)
         if: github.event.action != 'closed'
         env:
           GHES_PAT: ${{ secrets.GHES_PAT }}
         run: |
           set -euo pipefail
-          PR_ID="${{ steps.ensure_pr.outputs.existing_pr }}"
+          API_BASE="${{ env.GHES_BASE_URL }}/api/v3/repos/${{ env.GHES_OWNER }}/${{ env.GHES_REPO }}"
+          GH_ACCEPT="${GH_ACCEPT}"
           DRAFT_FLAG="${{ github.event.pull_request.draft }}"
-          API_PR="${{ env.GHES_BASE_URL }}/api/v3/repos/${{ env.GHES_OWNER }}/${{ env.GHES_REPO }}/pulls/${PR_ID}"
-          if [ -z "$PR_ID" ]; then
+          PR_ID="${{ steps.ensure_pr.outputs.existing_pr }}"
+
+          # Resolve PR_ID with small retry (GHES indexing can lag)
+          ATTEMPTS=0
+          while [ -z "${PR_ID}" ] && [ $ATTEMPTS -lt 3 ]; do
+            sleep 2
+            PR_NUM="${{ github.event.pull_request.number }}"
+            BRANCH="fork-pr-${PR_NUM}"
+            PR_ID="$(curl -sS -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
+                      "${API_BASE}/pulls?state=open&head=${{ env.GHES_OWNER }}:${BRANCH}" \
+                     | jq -r '.[0].number // empty')"
+            ATTEMPTS=$((ATTEMPTS+1))
+          done
+
+          if [ -z "${PR_ID}" ]; then
             echo "No GHES PR number resolved; skipping state alignment."
             exit 0
           fi
+
+          API_PR="${API_BASE}/pulls/${PR_ID}"
+
           if [ "$DRAFT_FLAG" = "true" ]; then
+            echo "Upstream=DRAFT → nudge GHES (ready→draft) to force event"
+            curl -sS -X POST -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
+                 "${API_PR}/ready_for_review" -o /dev/null || true
+            sleep 1
             curl -sS -X POST -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
                  "${API_PR}/convert_to_draft" -o /dev/null || true
           else
+            echo "Upstream=READY → nudge GHES (draft→ready) to force event"
+            curl -sS -X POST -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
+                 "${API_PR}/convert_to_draft" -o /dev/null || true
+            sleep 1
             curl -sS -X POST -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
                  "${API_PR}/ready_for_review" -o /dev/null || true
           fi
