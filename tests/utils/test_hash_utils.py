@@ -8,7 +8,7 @@
 import json
 import random
 
-import pytest
+import pyte
 
 from QEfficient.utils.constants import HASH_HEXDIGEST_STR_LEN
 from QEfficient.utils.hash_utils import hash_dict_params, json_serializable, to_hashable
