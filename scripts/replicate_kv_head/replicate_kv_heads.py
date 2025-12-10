@@ -7,7 +7,7 @@
 
 import argparse
 from typing import Optional
-import torch
+import torc
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from QEfficient import QEFFAutoModelForCausalLM, export
