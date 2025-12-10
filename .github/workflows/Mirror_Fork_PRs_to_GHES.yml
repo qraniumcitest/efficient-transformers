@@ -20,6 +20,7 @@ jobs:
       GHES_REPO: efficient-transformers
       FORK_OWNER: "qraniumcitest"
       FORK_REPO: "efficient-transformers"
+      # Preview headers required for draft/ready endpoints on GHES
       GH_ACCEPT: "application/vnd.github+json, application/vnd.github.shadow-cat-preview+json"
 
     steps:
@@ -80,74 +81,81 @@ jobs:
           git push ghes "HEAD:refs/heads/${BRANCH}" --force
           echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
 
-      - name: Create/Update GHES PR (metadata + marker + freshness)
+      # ✅ Canonical metadata refresh (single latest block; no stale duplicates)
+      - name: Create/Update GHES PR (metadata; canonical refresh)
         if: github.event.action != 'closed'
         id: ensure_pr
         env:
           GHES_PAT: ${{ secrets.GHES_PAT }}
+        shell: bash
         run: |
           set -euo pipefail
           PR_NUM="${{ github.event.pull_request.number }}"
-          BRANCH="${{ steps.push_branch.outputs.branch }}"
           TITLE="${{ github.event.pull_request.title }}"
           HEAD_SHA="${{ github.event.pull_request.head.sha }}"
           HEAD_REF="${{ github.event.pull_request.head.ref }}"
-          BODY_RAW="${{ github.event.pull_request.body }}"
           URL="${{ github.event.pull_request.html_url }}"
           DRAFT_FLAG="${{ github.event.pull_request.draft }}"
-          BODY_ESCAPED="$(echo "$BODY_RAW" | tr '\n' ' ' | tr '\r' ' ')"
+          API_BASE="${{ env.GHES_BASE_URL }}/api/v3/repos/${{ env.GHES_OWNER }}/${{ env.GHES_REPO }}"
+          API_PULLS="${API_BASE}/pulls"
+          GH_ACCEPT="${GH_ACCEPT}"
 
-          META=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
-                '[Mirror Metadata]' \
-                "Original-PR-Repo: ${{ env.FORK_OWNER }}/${{ env.FORK_REPO }}" \
-                "Original-PR-Number: ${PR_NUM}" \
-                "Original-PR-URL: ${URL}" \
-                "Original-Head-SHA: ${HEAD_SHA}" \
-                "Original-Head-Branch: ${HEAD_REF}" \
-                "Upstream-Draft:${DRAFT_FLAG}")
+          BRANCH="${{ steps.push_branch.outputs.branch }}"
+          EXISTING="$(curl -s -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
+                      "${API_PULLS}?state=open&head=${{ env.GHES_OWNER }}:${BRANCH}" | jq -r '.[0].number // empty')"
+
+          META="$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+            '[Mirror Metadata]' \
+            "Original-PR-Repo: ${{ env.FORK_OWNER }}/${{ env.FORK_REPO }}" \
+            "Original-PR-Number: ${PR_NUM}" \
+            "Original-PR-URL: ${URL}" \
+            "Original-Head-SHA: ${HEAD_SHA}" \
+            "Original-Head-Branch: ${HEAD_REF}" \
+            "Upstream-Draft: ${DRAFT_FLAG}")"
 
           FRESHNESS="Mirror-Updated-At: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 
-          PR_BODY=$(printf '%s\n\n%s\n%s\n\n%s\n' \
-            "$URL" \
-            "$META" \
-            "$FRESHNESS" \
-            "$BODY_ESCAPED")
-
-          API="${{ env.GHES_BASE_URL }}/api/v3/repos/${{ env.GHES_OWNER }}/${{ env.GHES_REPO }}/pulls"
-          EXISTING=$(curl -s \
-                      -H "Authorization: token ${GHES_PAT}" \
-                      -H "Accept: ${GH_ACCEPT}" \
-                      "${API}?state=open&head=${GHES_OWNER}:${BRANCH}" | jq -r '.[0].number // empty')
-
-          if [ "$DRAFT_FLAG" = "true" ]; then DRAFT_JSON=true; else DRAFT_JSON=false; fi
-
           if [ -n "$EXISTING" ]; then
-            echo "Updating GHES PR #${EXISTING} (refresh title/body + marker + freshness)"
+            CURRENT_JSON="$(curl -s -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" "${API_PULLS}/${EXISTING}")"
+            CUR_BODY="$(printf '%s' "$CURRENT_JSON" | jq -r '.body // ""')"
+
+            CLEAN="$(printf '%s\n' "$CUR_BODY" \
+              | sed -E '/^\[Mirror Metadata\]/I,/^$/d' \
+              | sed -E 's/^[[:space:]]*Original-PR-Repo:.*$//Ig' \
+              | sed -E 's/^[[:space:]]*Original-PR-Number:.*$//Ig' \
+              | sed -E 's/^[[:space:]]*Original-PR-URL:.*$//Ig' \
+              | sed -E 's/^[[:space:]]*Original-Head-SHA:.*$//Ig' \
+              | sed -E 's/^[[:space:]]*Original-Head-Branch:.*$//Ig' \
+              | sed -E 's/^[[:space:]]*Upstream-Draft:.*$//Ig' \
+              | sed -E 's/^[[:space:]]*Mirror-Updated-At:.*$//Ig' \
+              | sed -E 's/[[:space:]]+$//' )"
+
+            NEW_BODY="$(printf '%s\n\n%s\n%s\n' "$CLEAN" "$META" "$FRESHNESS")"
+
+            echo "Updating GHES PR #${EXISTING} with canonical metadata"
             curl -s -X PATCH \
-              -H "Authorization: token ${GHES_PAT}" \
-              -H "Accept: ${GH_ACCEPT}" \
-              "${API}/${EXISTING}" \
-              -d "$(jq -n --arg t "[Fork PR #${PR_NUM}] ${TITLE}" --arg b "$PR_BODY" '{title:$t, body:$b}')" > /dev/null
+              -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
+              "${API_PULLS}/${EXISTING}" \
+              -d "$(jq -n --arg t "[Fork PR #${PR_NUM}] ${TITLE}" --arg b "$NEW_BODY" '{title:$t, body:$b}')" >/dev/null
+
             echo "existing_pr=${EXISTING}" >> "$GITHUB_OUTPUT"
           else
-            echo "Creating GHES PR (draft=${DRAFT_JSON})"
-            RESP=$(curl -s -X POST \
-              -H "Authorization: token ${GHES_PAT}" \
-              -H "Accept: ${GH_ACCEPT}" \
-              "${API}" \
+            NEW_BODY="$(printf '%s\n\n%s\n%s\n' "$URL" "$META" "$FRESHNESS")"
+            RESP="$(curl -s -X POST \
+              -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
+              "${API_PULLS}" \
               -d "$(jq -n \
                     --arg t "[Fork PR #${PR_NUM}] ${TITLE}" \
                     --arg h "${BRANCH}" \
-                    --arg b "$PR_BODY" \
+                    --arg b "$NEW_BODY" \
                     --arg base "main" \
-                    --argjson draft "$DRAFT_JSON" \
-                    '{title:$t, head:$h, base:$base, body:$b, draft:$draft}')" )
-            CREATED_NUM=$(echo "$RESP" | jq -r '.number // empty')
+                    --argjson draft $([ "$DRAFT_FLAG" = "true" ] && echo true || echo false) \
+                    '{title:$t, head:$h, base:$base, body:$b, draft:$draft}')" )"
+            CREATED_NUM="$(printf '%s' "$RESP" | jq -r '.number // empty')"
             echo "existing_pr=${CREATED_NUM}" >> "$GITHUB_OUTPUT"
           fi
 
-      # Set commit status on current head SHA for gating in internal repo
+      # Set commit status (qeff/ready) on the current head SHA
       - name: Set commit status gate (qeff/ready)
         if: github.event.action != 'closed'
         env:
@@ -198,7 +206,7 @@ jobs:
                  "${API_PR}/ready_for_review" > /dev/null || true
           fi
 
-      # 👉 Dispatch ONLY for Draft→Ready transition (not for commits while Ready)
+      # Dispatch ONLY for Draft→Ready transition (not for commits while Ready)
       - name: Trigger internal workflow via workflow_dispatch (only on Ready transition)
         if: github.event.action == 'ready_for_review' && github.event.pull_request.draft == false
         env:
