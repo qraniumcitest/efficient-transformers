@@ -1,3 +1,4 @@
+
 name: Mirror Fork PRs to GHES
 
 on:
@@ -150,50 +151,55 @@ jobs:
             echo "existing_pr=${CREATED_NUM}" >> "$GITHUB_OUTPUT"
           fi
 
-      # Best-effort: try to flip GHES PR state (not used for triggering)
-      - name: Align GHES PR state to upstream (best-effort)
+      # NEW: Set commit status (qeff/ready) on the current head SHA
+      - name: Set commit status gate (qeff/ready)
         if: github.event.action != 'closed'
         env:
           GHES_PAT: ${{ secrets.GHES_PAT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          API_BASE="${{ env.GHES_BASE_URL }}/api/v3"
+          OWNER="${{ env.GHES_OWNER }}"
+          REPO="${{ env.GHES_REPO }}"
+          SHA="${{ github.event.pull_request.head.sha }}"
+          STATE="$([ "${{ github.event.pull_request.draft }}" = "true" ] && echo pending || echo success)"
+          DESC="$([ "$STATE" = "success" ] && echo 'Upstream PR Ready for CI' || echo 'Upstream PR is Draft')"
+          echo "Setting commit status on ${OWNER}/${REPO}@${SHA} → state=${STATE}, context=qeff/ready"
+          curl -sS -X POST \
+            -H "Authorization: token ${GHES_PAT}" \
+            -H "Accept: application/vnd.github+json" \
+            "${API_BASE}/repos/${OWNER}/${REPO}/statuses/${SHA}" \
+            -d "$(jq -n \
+                  --arg state "$STATE" \
+                  --arg context "qeff/ready" \
+                  --arg description "$DESC" \
+                  '{state:$state, context:$context, description:$description}')"
+
+      # Align GHES PR state to upstream (single endpoint; avoids flapping)
+      - name: Align GHES PR state to upstream (single endpoint)
+        if: github.event.action != 'closed'
+        env:
+          GHES_PAT: ${{ secrets.GHES_PAT }}
+        shell: bash
         run: |
           set -euo pipefail
           API_BASE="${{ env.GHES_BASE_URL }}/api/v3/repos/${{ env.GHES_OWNER }}/${{ env.GHES_REPO }}"
-          GH_ACCEPT="${GH_ACCEPT}"
           DRAFT_FLAG="${{ github.event.pull_request.draft }}"
           PR_ID="${{ steps.ensure_pr.outputs.existing_pr }}"
-
-          ATTEMPTS=0
-          while [ -z "${PR_ID}" ] && [ $ATTEMPTS -lt 3 ]; do
-            sleep 2
-            PR_NUM="${{ github.event.pull_request.number }}"
-            BRANCH="fork-pr-${PR_NUM}"
-            PR_ID="$(curl -sS -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
-                      "${API_BASE}/pulls?state=open&head=${{ env.GHES_OWNER }}:${BRANCH}" \
-                     | jq -r '.[0].number // empty')"
-            ATTEMPTS=$((ATTEMPTS+1))
-          done
-
           if [ -z "${PR_ID}" ]; then
             echo "No GHES PR number resolved; skipping state alignment."
             exit 0
           fi
-
           API_PR="${API_BASE}/pulls/${PR_ID}"
-
           if [ "$DRAFT_FLAG" = "true" ]; then
-            echo "Upstream=DRAFT → nudge GHES (ready→draft)"
+            echo "Upstream=DRAFT → ensure GHES is draft"
             curl -sS -X POST -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
-                 "${API_PR}/ready_for_review" -o /dev/null || true
-            sleep 1
-            curl -sS -X POST -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
-                 "${API_PR}/convert_to_draft" -o /dev/null || true
+                 "${API_PR}/convert_to_draft" > /dev/null || true
           else
-            echo "Upstream=READY → nudge GHES (draft→ready)"
+            echo "Upstream=READY → ensure GHES is ready"
             curl -sS -X POST -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
-                 "${API_PR}/convert_to_draft" -o /dev/null || true
-            sleep 1
-            curl -sS -X POST -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
-                 "${API_PR}/ready_for_review" -o /dev/null || true
+                 "${API_PR}/ready_for_review" > /dev/null || true
           fi
 
       - name: Close up GHES branches for closed upstream PRs
