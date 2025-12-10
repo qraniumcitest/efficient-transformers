@@ -198,28 +198,52 @@ jobs:
                  "${API_PR}/ready_for_review" > /dev/null || true
           fi
 
-      # 👉 NEW: Dispatch ONLY for Draft→Ready transition (not for commits while Ready)
+      # 👉 Dispatch ONLY for Draft→Ready transition (not for commits while Ready)
       - name: Trigger internal workflow via workflow_dispatch (only on Ready transition)
         if: github.event.action == 'ready_for_review' && github.event.pull_request.draft == false
         env:
           GHES_PAT: ${{ secrets.GHES_PAT }}        # PAT with 'repo' scope in GHES
           TARGET_OWNER: qranium                   # internal org/owner
           TARGET_REPO: efficient-transformers     # internal repo
-          WORKFLOW_FILE: .github/workflows/post_feedback_to_gh_pr.yml  # internal workflow file (or numeric id)
+          TARGET_REF: main                        # branch that contains the workflow file
+          WORKFLOW_FILE_NAME: post_feedback_to_gh_pr.yml  # exact file name (NOT path)
         shell: bash
         run: |
           set -euo pipefail
-          API="https://github.qualcomm.com/api/v3/repos/${TARGET_OWNER}/${TARGET_REPO}/actions/workflows/${WORKFLOW_FILE}/dispatches"
-          REF="main"
+          API_BASE="https://github.qualcomm.com/api/v3/repos/${TARGET_OWNER}/${TARGET_REPO}"
+
+          echo "Resolving workflow ID for file: ${WORKFLOW_FILE_NAME}"
+          WF_LIST="$(curl -sS -H "Authorization: token ${GHES_PAT}" -H "Accept: application/vnd.github+json" \
+            "${API_BASE}/actions/workflows")"
+          WF_ID="$(printf '%s' "${WF_LIST}" | jq -r --arg name "${WORKFLOW_FILE_NAME}" \
+            '.workflows[] | select(.path | endswith($name)) | .id')"
+
+          if [ -z "${WF_ID}" ] || [ "${WF_ID}" = "null" ]; then
+            echo "❌ Workflow '${WORKFLOW_FILE_NAME}' not found in ${TARGET_OWNER}/${TARGET_REPO}."
+            echo "Workflows response:"; echo "${WF_LIST}" | jq .
+            exit 1
+          fi
+
           PR="${{ github.event.pull_request.number }}"
           SHA="${{ github.event.pull_request.head.sha }}"
-          echo "Dispatching internal workflow: ${TARGET_OWNER}/${TARGET_REPO}:${WORKFLOW_FILE} ref=${REF} pr=${PR} sha=${SHA}"
-          curl -sS -X POST \
-               -H "Authorization: token ${GHES_PAT}" \
-               -H "Accept: application/vnd.github+json" \
-               "${API}" \
-               -d "$(jq -n --arg ref "$REF" --arg pr "$PR" --arg sha "$SHA" \
-                    '{ref: $ref, inputs: {pr_number: $pr, head_sha: $sha}}')"
+          DISPATCH_URL="${API_BASE}/actions/workflows/${WF_ID}/dispatches"
+
+          echo "Dispatching internal workflow id=${WF_ID} on ref='${TARGET_REF}' (pr=${PR}, sha=${SHA})"
+          HTTP_CODE="$(curl -sS -o /tmp/dispatch.out -w "%{http_code}" \
+            -X POST \
+            -H "Authorization: token ${GHES_PAT}" \
+            -H "Accept: application/vnd.github+json" \
+            "${DISPATCH_URL}" \
+            -d "$(jq -n --arg ref "${TARGET_REF}" --arg pr "${PR}" --arg sha "${SHA}" \
+                  '{ref: $ref, inputs: {pr_number: $pr, head_sha: $sha}}')" )"
+
+          if [ "${HTTP_CODE}" != "204" ]; then
+            echo "❌ workflow_dispatch failed (HTTP ${HTTP_CODE})"
+            [ -f /tmp/dispatch.out ] && cat /tmp/dispatch.out || true
+            exit 1
+          fi
+
+          echo "✅ workflow_dispatch accepted (204 No Content)"
 
       - name: Close up GHES branches for closed upstream PRs
         if: github.event.action == 'closed'
