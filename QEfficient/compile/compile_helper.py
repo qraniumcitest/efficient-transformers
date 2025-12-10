@@ -10,7 +10,7 @@ import os
 import shutil
 import subprocess
 import warnings
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tupl
 
 from QEfficient.compile.qnn_compiler import compile as qnn_compile
 from QEfficient.utils import constants
