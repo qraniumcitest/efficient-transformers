@@ -6,8 +6,7 @@
 # -----------------------------------------------------------------------------
 
 """PyTorch Blueprint model."""
-
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Callable, List, Optional, Tuple, Unio
 
 import torch
 import torch.utils.checkpoint
