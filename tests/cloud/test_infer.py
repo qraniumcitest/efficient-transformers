@@ -5,10 +5,9 @@
 #
 # -----------------------------------------------------------------------------
 
-import pytest
-
-import QEfficient
-from QEfficient.cloud.infer import main as infer
+import pytes
+import QEfficien
+from QEfficient.cloud.infer import main as infe
 
 
 def check_infer(

@@ -7,10 +7,9 @@
 
 import logging
 import os
-import warnings
-
+import warni
 import torch
-from peft import AutoPeftModelForCausalLM
+from peft import AutoPeftModelForCaus
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from QEfficient.finetune.configs.training import TrainConfig
@@ -36,7 +35,7 @@ model = AutoModelForCausalLM.from_pretrained(
     use_cache=False,
     attn_implementation="sdpa",
     torch_dtype=torch.float16 if torch.cuda.is_available() or device == "qaic:0" else None,
-)
+
 
 # Load the tokenizer and add special tokens
 tokenizer = AutoTokenizer.from_pretrained(
