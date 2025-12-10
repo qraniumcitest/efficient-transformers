@@ -1,4 +1,3 @@
-
 name: Mirror Fork PRs to GHES
 
 on:
@@ -21,7 +20,6 @@ jobs:
       GHES_REPO: efficient-transformers
       FORK_OWNER: "qraniumcitest"
       FORK_REPO: "efficient-transformers"
-      # Preview headers required for draft/ready endpoints on GHES
       GH_ACCEPT: "application/vnd.github+json, application/vnd.github.shadow-cat-preview+json"
 
     steps:
@@ -33,12 +31,11 @@ jobs:
 
       - name: Debug event
         run: |
-          echo "Event name  : ${{ github.event_name }}"
-          echo "Action      : ${{ github.event.action }}"
-          echo "PR number   : ${{ github.event.pull_request.number }}"
-          echo "PR draft    : ${{ github.event.pull_request.draft }}"
-          echo "Head ref    : ${{ github.event.pull_request.head.ref }}"
-          echo "Head sha    : ${{ github.event.pull_request.head.sha }}"
+          echo "Event      : ${{ github.event_name }} / ${{ github.event.action }}"
+          echo "PR #       : ${{ github.event.pull_request.number }}"
+          echo "Draft?     : ${{ github.event.pull_request.draft }}"
+          echo "Head ref   : ${{ github.event.pull_request.head.ref }}"
+          echo "Head sha   : ${{ github.event.pull_request.head.sha }}"
 
       - name: Preflight - verify GHES env and connectivity
         run: |
@@ -109,7 +106,6 @@ jobs:
                 "Original-Head-Branch: ${HEAD_REF}" \
                 "Upstream-Draft:${DRAFT_FLAG}")
 
-          # Freshness line guarantees GHES emits `edited` even if state doesn't flip
           FRESHNESS="Mirror-Updated-At: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 
           PR_BODY=$(printf '%s\n\n%s\n%s\n\n%s\n' \
@@ -151,7 +147,7 @@ jobs:
             echo "existing_pr=${CREATED_NUM}" >> "$GITHUB_OUTPUT"
           fi
 
-      # NEW: Set commit status (qeff/ready) on the current head SHA
+      # Set commit status on current head SHA for gating in internal repo
       - name: Set commit status gate (qeff/ready)
         if: github.event.action != 'closed'
         env:
@@ -201,6 +197,29 @@ jobs:
             curl -sS -X POST -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
                  "${API_PR}/ready_for_review" > /dev/null || true
           fi
+
+      # 👉 NEW: Dispatch ONLY for Draft→Ready transition (not for commits while Ready)
+      - name: Trigger internal workflow via workflow_dispatch (only on Ready transition)
+        if: github.event.action == 'ready_for_review' && github.event.pull_request.draft == false
+        env:
+          GHES_PAT: ${{ secrets.GHES_PAT }}        # PAT with 'repo' scope in GHES
+          TARGET_OWNER: qranium                   # internal org/owner
+          TARGET_REPO: efficient-transformers     # internal repo
+          WORKFLOW_FILE: .github/workflows/post_feedback_to_gh_pr.yml  # internal workflow file (or numeric id)
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://github.qualcomm.com/api/v3/repos/${TARGET_OWNER}/${TARGET_REPO}/actions/workflows/${WORKFLOW_FILE}/dispatches"
+          REF="main"
+          PR="${{ github.event.pull_request.number }}"
+          SHA="${{ github.event.pull_request.head.sha }}"
+          echo "Dispatching internal workflow: ${TARGET_OWNER}/${TARGET_REPO}:${WORKFLOW_FILE} ref=${REF} pr=${PR} sha=${SHA}"
+          curl -sS -X POST \
+               -H "Authorization: token ${GHES_PAT}" \
+               -H "Accept: application/vnd.github+json" \
+               "${API}" \
+               -d "$(jq -n --arg ref "$REF" --arg pr "$PR" --arg sha "$SHA" \
+                    '{ref: $ref, inputs: {pr_number: $pr, head_sha: $sha}}')"
 
       - name: Close up GHES branches for closed upstream PRs
         if: github.event.action == 'closed'
