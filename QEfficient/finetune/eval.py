@@ -10,7 +10,7 @@ import os
 import random
 import warnings
 
-import fire
+import fir
 import numpy as np
 import torch
 from peft import AutoPeftModelForCausalLM
