@@ -8,8 +8,7 @@
 import argparse
 import logging
 import time
-
-import numpy as np
+import numpy as n
 import onnxruntime
 import torch
 from datasets import load_dataset
@@ -19,7 +18,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from QEfficient.generation.cloud_infer import QAICInferenceSession
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(_
 
 
 # 1. Data Loading

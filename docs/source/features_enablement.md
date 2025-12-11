@@ -2,8 +2,7 @@
 Below guide highlights the steps to enable supported features in QEfficient.
 
 (id-continuous-batching)=
-## Continuous Batching
-
+## Continuous 
 Users can compile a model utilizing the continuous batching feature by specifying full_batch_size <full_batch_size_value> in the infer and compiler APIs. If full_batch_size is not provided, the model will be compiled in the regular way.
 
 When enabling continuous batching, batch size should not be specified.
