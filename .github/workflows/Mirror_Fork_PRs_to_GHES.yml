@@ -139,7 +139,7 @@ jobs:
             echo "existing_pr=${CREATED_NUM}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Set commit status gate (qeff/ready: pending for draft, success otherwise)
+      - name: Set commit status gate #(qeff/ready: pending for draft, success otherwise)
         if: github.event.action != 'closed'
         env:
           GHES_PAT: ${{ secrets.GHES_PAT }}
