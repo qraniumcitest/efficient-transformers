@@ -4,10 +4,8 @@
 # SPDX-License-Identifier: BSD-3-Clause
 #
 # -----------------------------------------------------------------------------
-
 import os
 from time import perf_counter
-
 import numpy as np
 import onnx
 import pytest
