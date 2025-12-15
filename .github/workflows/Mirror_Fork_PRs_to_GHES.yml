@@ -2,6 +2,7 @@ name: Mirror Fork PRs to GHES
 
 on:
   pull_request:
+    # PR created, draft→ready transition, commits, reopen, close
     types: [opened, ready_for_review, synchronize, reopened, closed]
     branches: ["main"]
 
@@ -80,6 +81,7 @@ jobs:
           git push ghes "HEAD:refs/heads/${BRANCH}" --force
           echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
 
+      # Create/update GHES PR with canonical title AND body markers (for robust metadata)
       - name: Ensure GHES PR exists with canonical title + metadata markers
         if: github.event.action != 'closed'
         id: ensure_pr
@@ -98,6 +100,7 @@ jobs:
           BODY_MARKERS="$(printf 'Original-PR-Repo: %s/%s\nOriginal-PR-Number: %s\nOriginal-Head-SHA: %s\n' \
                          '${{ env.FORK_OWNER }}' '${{ env.FORK_REPO }}' "${PR_NUM}" "${HEAD_SHA}")"
 
+          # Find existing PR by head ref
           EXISTING="$(curl -s -H "Authorization: token ${GHES_PAT}" -H "Accept: ${{ env.GH_ACCEPT }}" \
                       "${API}?state=open&head=${{ env.GHES_OWNER }}:${BRANCH}" | jq -r '.[0].number // empty')"
 
@@ -105,6 +108,7 @@ jobs:
 
           if [ -n "$EXISTING" ]; then
             echo "Updating GHES PR #${EXISTING} title/body to canonical form"
+            # Append markers if missing
             CUR_BODY="$(curl -s -H "Authorization: token ${GHES_PAT}" -H "Accept: ${{ env.GH_ACCEPT }}" "${API}/${EXISTING}" | jq -r '.body // ""')"
             HAS_REPO="$(printf '%s' "$CUR_BODY" | grep -i '^Original-PR-Repo:' || true)"
             HAS_NUM="$(printf '%s' "$CUR_BODY" | grep -i '^Original-PR-Number:' || true)"
@@ -158,46 +162,9 @@ jobs:
                   --arg description "$DESC" \
                   '{state:$state, context:$context, description:$description}')"
 
-      - name: Align GHES PR state to upstream (robust)
-        if: github.event.action != 'closed'
-        env:
-          GHES_PAT: ${{ secrets.GHES_PAT }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          API_BASE="${{ env.GHES_BASE_URL }}/api/v3/repos/${{ env.GHES_OWNER }}/${{ env.GHES_REPO }}"
-          DRAFT_FLAG="${{ github.event.pull_request.draft }}"
-          PR_ID="${{ steps.ensure_pr.outputs.existing_pr }}"
-
-          if [ -z "${PR_ID}" ]; then
-            echo "No GHES PR number resolved; skipping state alignment."
-            exit 0
-          fi
-
-          API_PR="${API_BASE}/pulls/${PR_ID}"
-
-          if [ "$DRAFT_FLAG" = "true" ]; then
-            CODE="$(curl -sS -o /tmp/align.out -w "%{http_code}" -X POST \
-              -H "Authorization: token ${GHES_PAT}" -H "Accept: application/vnd.github+json" \
-              "${API_PR}/convert_to_draft" || echo "000")"
-            echo "convert_to_draft → HTTP ${CODE}"
-            if [ "${CODE}" != "200" ] && [ "${CODE}" != "202" ] && [ "${CODE}" != "409" ] && [ "${CODE}" != "422" ]; then
-              echo "Response:"; sed -n '1,200p' /tmp/align.out || true
-              exit 1
-            fi
-          else
-            CODE="$(curl -sS -o /tmp/align.out -w "%{http_code}" -X POST \
-              -H "Authorization: token ${GHES_PAT}" -H "Accept: application/vnd.github+json" \
-              "${API_PR}/ready_for_review" || echo "000")"
-            echo "ready_for_review → HTTP ${CODE}"
-            if [ "${CODE}" != "200" ] && [ "${CODE}" != "202" ] && [ "${CODE}" != "409" ] && [ "${CODE}" != "422" ]; then
-              echo "Response:"; sed -n '1,200p' /tmp/align.out || true
-              exit 1
-            fi
-          fi
-
-      - name: Trigger internal workflow via workflow_dispatch (only after alignment)
-        if: ${{ success() && github.event.action == 'ready_for_review' && github.event.pull_request.draft == false }}
+      # ✅ Dispatch internal workflow (no alignment)
+      - name: Trigger internal workflow via workflow_dispatch (Ready transition only)
+        if: github.event.action == 'ready_for_review' && github.event.pull_request.draft == false
         env:
           GHES_PAT: ${{ secrets.GHES_PAT }}
           TARGET_OWNER: qranium
@@ -232,12 +199,13 @@ jobs:
           fi
           echo "✅ workflow_dispatch accepted (204 No Content)"
 
+      # 🔚 Cleanup when upstream PR closes
       - name: Close GHES PR and delete mirrored branch (cleanup)
         if: github.event.action == 'closed'
         env:
           GHES_PAT:  ${{ secrets.GHES_PAT  }}
         shell: bash
-        run: |
+               run: |
           set -euo pipefail
           PR_NUM="${{ github.event.pull_request.number }}"
           BRANCH="fork-pr-${PR_NUM}"
@@ -269,7 +237,7 @@ jobs:
           DEL_CODE="$(curl -sS -o /tmp/del.out -w "%{http_code}" \
             -X DELETE \
             -H "Authorization: token ${GHES_PAT}" -H "Accept: ${{ env.GH_ACCEPT }}" \
-                       "${API_BASE}/git/refs/heads/${BRANCH}")"
+            "${API_BASE}/git/refs/heads/${BRANCH}")"
           if [ "${DEL_CODE}" = "204" ] || [ "${DEL_CODE}" = "404" ]; then
             echo "Branch delete completed (HTTP ${DEL_CODE})"
           else
