@@ -6,7 +6,6 @@
 # -----------------------------------------------------------------------------
 
 ## This example works on continuous batching with different lora adapters in the same batch ##
-
 from QEfficient import QEffAutoPeftModelForCausalLM
 from QEfficient.utils import load_hf_tokenizer
 
