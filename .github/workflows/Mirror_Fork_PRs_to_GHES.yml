@@ -81,7 +81,7 @@ jobs:
           git push ghes "HEAD:refs/heads/${BRANCH}" --force
           echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
 
-      # Create/update GHES PR with canonical title AND body markers (for robust metadata)
+      # Create/update GHES PR with canonical title AND body markers (robust metadata)
       - name: Ensure GHES PR exists with canonical title + metadata markers
         if: github.event.action != 'closed'
         id: ensure_pr
@@ -139,7 +139,7 @@ jobs:
             echo "existing_pr=${CREATED_NUM}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Set commit status gate #(qeff/ready: pending for draft, success otherwise)
+      - name: Set commit status gate (qeff/ready: pending for draft, success otherwise)
         if: github.event.action != 'closed'
         env:
           GHES_PAT: ${{ secrets.GHES_PAT }}
@@ -162,33 +162,67 @@ jobs:
                   --arg description "$DESC" \
                   '{state:$state, context:$context, description:$description}')"
 
-      # Dispatch internal workflow for ALL non-draft events (opened, ready_for_review, synchronize, reopened)
-      - name: Trigger internal workflow via workflow_dispatch (non-draft PRs only)
-        if: github.event.pull_request.draft == false && github.event.action != 'closed'
+      # Align GHES PR state to upstream (best-effort, not critical for CI)
+      - name: Align GHES PR state to upstream (single endpoint)
+        if: github.event.action != 'closed'
+        env:
+          GHES_PAT: ${{ secrets.GHES_PAT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          API_BASE="${{ env.GHES_BASE_URL }}/api/v3/repos/${{ env.GHES_OWNER }}/${{ env.GHES_REPO }}"
+          DRAFT_FLAG="${{ github.event.pull_request.draft }}"
+          PR_ID="${{ steps.ensure_pr.outputs.existing_pr }}"
+          if [ -z "${PR_ID}" ]; then
+            echo "No GHES PR number resolved; skipping state alignment."
+            exit 0
+          fi
+          API_PR="${API_BASE}/pulls/${PR_ID}"
+          if [ "$DRAFT_FLAG" = "true" ]; then
+            echo "Upstream=DRAFT → ensure GHES is draft"
+            curl -sS -X POST -H "Authorization: token ${GHES_PAT}" -H "Accept: ${{ env.GH_ACCEPT }}" \
+                 "${API_PR}/convert_to_draft" >/dev/null || true
+          else
+            echo "Upstream=READY → ensure GHES is ready"
+            curl -sS -X POST -H "Authorization: token ${GHES_PAT}" -H "Accept: ${{ env.GH_ACCEPT }}" \
+                 "${API_PR}/ready_for_review" >/dev/null || true
+          fi
+
+      # Dispatch ONLY for Draft→Ready transition (not for commits while Ready)
+      - name: Trigger internal workflow via workflow_dispatch (only on Ready transition)
+        if: github.event.action == 'ready_for_review' && github.event.pull_request.draft == false
         env:
           GHES_PAT: ${{ secrets.GHES_PAT }}
           TARGET_OWNER: qranium
           TARGET_REPO: efficient-transformers
           TARGET_REF: main
-          WORKFLOW_FILE_NAME: post_feedback_to_gh_pr.yml
+          WORKFLOW_FILE_NAME: .github/workflows/post_feedback_to_gh_pr.yml
         shell: bash
         run: |
           set -euo pipefail
           API_BASE="https://github.qualcomm.com/api/v3/repos/${TARGET_OWNER}/${TARGET_REPO}"
+
+          echo "Resolving workflow ID for path: ${WORKFLOW_FILE_NAME}"
           WF_LIST="$(curl -sS -H "Authorization: token ${GHES_PAT}" -H "Accept: application/vnd.github+json" \
             "${API_BASE}/actions/workflows")"
-          WF_ID="$(printf '%s' "${WF_LIST}" | jq -r --arg name "${WORKFLOW_FILE_NAME}" \
-            '.workflows[] | select(.path | endswith($name)) | .id')"
+          WF_ID="$(printf '%s' "${WF_LIST}" | jq -r --arg path "${WORKFLOW_FILE_NAME}" \
+            '.workflows[] | select(.path == $path) | .id')"
+
           if [ -z "${WF_ID}" ] || [ "${WF_ID}" = "null" ]; then
-            echo "❌ Workflow '${WORKFLOW_FILE_NAME}' not found in ${TARGET_OWNER}/${TARGET_REPO}."
-            echo "${WF_LIST}" | jq .
+            echo "❌ Workflow '${WORKFLOW_FILE_NAME}' not found on ${TARGET_OWNER}/${TARGET_REPO}@${TARGET_REF}"
+            echo "Workflows response:"; echo "${WF_LIST}" | jq .
             exit 1
           fi
+
           PR="${{ github.event.pull_request.number }}"
           SHA="${{ github.event.pull_request.head.sha }}"
           DISPATCH_URL="${API_BASE}/actions/workflows/${WF_ID}/dispatches"
+
+          echo "Dispatching internal workflow id=${WF_ID} on ref='${TARGET_REF}' (pr=${PR}, sha=${SHA})"
           CODE="$(curl -sS -o /tmp/dispatch.out -w "%{http_code}" \
-            -X POST -H "Authorization: token ${GHES_PAT}" -H "Accept: application/vnd.github+json" \
+            -X POST \
+            -H "Authorization: token ${GHES_PAT}" \
+            -H "Accept: application/vnd.github+json" \
             "${DISPATCH_URL}" \
             -d "$(jq -n --arg ref "${TARGET_REF}" --arg pr "${PR}" --arg sha "${SHA}" \
                   '{ref: $ref, inputs: {pr_number: $pr, head_sha: $sha}}')" || echo "000")"
@@ -228,7 +262,7 @@ jobs:
             else
               echo "No GHES PR found for ${BRANCH} (already closed or never created)."
             fi
-                   else
+          else
             echo "Pulls query failed HTTP=${HTTP_CODE}; payload:"
             echo "$JSON"
           fi
@@ -238,7 +272,7 @@ jobs:
             -X DELETE \
             -H "Authorization: token ${GHES_PAT}" -H "Accept: ${{ env.GH_ACCEPT }}" \
             "${API_BASE}/git/refs/heads/${BRANCH}")"
-          if [ "${DEL_CODE}" = "204" ] || [ "${DEL_CODE}" = "404" ]; then
+          if [ "${DEL_CODE}" = "204" ] ||          if [ "${DEL_CODE}" = "204" ] || [ "${DEL_CODE}" = "404" ]; then
             echo "Branch delete completed (HTTP ${DEL_CODE})"
           else
             echo "Branch delete returned HTTP ${DEL_CODE}"
