@@ -52,7 +52,7 @@ jobs:
           # Expose JSON path for later steps
           echo "json_path=${JSON_PATH}" >> "$GITHUB_OUTPUT"
 
-      - name: 📋 Show QGenie review (table or full comment) and compute severity
+      - name: 📋 Show review (table or full comment) and compute severity
         id: analyze
         run: |
           set -euo pipefail
@@ -64,7 +64,7 @@ jobs:
           echo "Using Python helper: ${PY_HELPER}"
           echo
 
-          echo "===== QGenie review ====="
+          echo "===== Internal review ====="
 
           # Run analyzer but DO NOT let a non-zero exit code fail this step.
           # Also capture its output to parse worst_severity=... if it prints that.
@@ -157,7 +157,7 @@ jobs:
             "https://api.github.com/repos/${ORIG_REPO}/statuses/${ORIG_SHA}" \
             -d "$(jq -n \
               --arg state "$STATE" \
-              --arg context "internal-review/qgenie" \
+              --arg context "internal-review" \
               --arg description "$SUMMARY" \
               --arg target_url "$TARGET_URL" \
               '{
