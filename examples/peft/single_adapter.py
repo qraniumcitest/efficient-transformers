@@ -8,7 +8,6 @@
 ## This example demonstrates single adapter usage with sequential adapter switching ##
 
 from transformers import AutoTokenizer, TextStreamer
-
 from QEfficient import QEffAutoPeftModelForCausalLM
 
 base_model_name = "mistralai/Mistral-7B-v0.1"
