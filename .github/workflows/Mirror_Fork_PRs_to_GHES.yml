@@ -180,23 +180,43 @@ jobs:
         run: |
           set -euo pipefail
           API_BASE="https://github.qualcomm.com/api/v3/repos/${TARGET_OWNER}/${TARGET_REPO}"
+
+          # 1) Find workflow ID from workflow file name
           WF_LIST="$(curl -sS -H "Authorization: token ${GHES_PAT}" -H "Accept: application/vnd.github+json" \
             "${API_BASE}/actions/workflows")"
           WF_ID="$(printf '%s' "${WF_LIST}" | jq -r --arg name "${WORKFLOW_FILE_NAME}" \
             '.workflows[] | select(.path | endswith($name)) | .id')"
+
           if [ -z "${WF_ID}" ] || [ "${WF_ID}" = "null" ]; then
             echo "❌ Workflow '${WORKFLOW_FILE_NAME}' not found in ${TARGET_OWNER}/${TARGET_REPO}."
             echo "${WF_LIST}" | jq .
             exit 1
           fi
-          PR="${{ github.event.pull_request.number }}"
+
+          # 2) External and internal PR numbers + SHA
+          EXT_PR="${{ github.event.pull_request.number }}"
           SHA="${{ github.event.pull_request.head.sha }}"
+          INT_PR="${{ steps.ensure_pr.outputs.existing_pr }}"
+
+          echo "External PR: ${EXT_PR}"
+          echo "Internal GHES PR: ${INT_PR}"
+          echo "Head SHA: ${SHA}"
+
+          # 3) Dispatch internal workflow with correct mapping:
+          #    - pr_number   = internal GHES PR id
+          #    - external_pr = external PR id
+          #    - head_sha    = external head SHA
           DISPATCH_URL="${API_BASE}/actions/workflows/${WF_ID}/dispatches"
           HTTP_CODE="$(curl -sS -o /tmp/dispatch.out -w "%{http_code}" \
             -X POST -H "Authorization: token ${GHES_PAT}" -H "Accept: application/vnd.github+json" \
             "${DISPATCH_URL}" \
-            -d "$(jq -n --arg ref "${TARGET_REF}" --arg pr "${PR}" --arg sha "${SHA}" \
-                  '{ref: $ref, inputs: {pr_number: $pr, head_sha: $sha}}')" )"
+            -d "$(jq -n \
+                  --arg ref "${TARGET_REF}" \
+                  --arg int_pr "${INT_PR}" \
+                  --arg ext_pr "${EXT_PR}" \
+                  --arg sha "${SHA}" \
+                  '{ref: $ref, inputs: {pr_number: $int_pr, external_pr: $ext_pr, head_sha: $sha}}')" )"
+
           if [ "${HTTP_CODE}" != "204" ]; then
             echo "❌ workflow_dispatch failed (HTTP ${HTTP_CODE})"
             [ -f /tmp/dispatch.out ] && cat /tmp/dispatch.out || true
