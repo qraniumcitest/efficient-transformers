@@ -205,7 +205,7 @@ jobs:
         env:
           GHES_PAT:  ${{ secrets.GHES_PAT  }}
         shell: bash
-               run: |
+        run: |
           set -euo pipefail
           PR_NUM="${{ github.event.pull_request.number }}"
           BRANCH="fork-pr-${PR_NUM}"
