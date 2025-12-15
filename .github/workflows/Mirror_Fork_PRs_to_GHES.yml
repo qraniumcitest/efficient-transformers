@@ -70,7 +70,7 @@ jobs:
           git remote set-url ghes "https://${GHES_USER}:${GHES_PAT}@github.qualcomm.com/${GHES_OWNER}/${GHES_REPO}.git"
           git ls-remote ghes --heads
 
-      - name: Push PR branch to GHES
+      - name: Push PR branch to GHES (always sync while open)
         if: github.event.action != 'closed'
         id: push_branch
         shell: bash
@@ -139,7 +139,7 @@ jobs:
             echo "existing_pr=${CREATED_NUM}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Set commit status gate (qeff/ready)
+      - name: Set commit status gate (qeff/ready: pending for draft, success otherwise)
         if: github.event.action != 'closed'
         env:
           GHES_PAT: ${{ secrets.GHES_PAT }}
@@ -162,9 +162,9 @@ jobs:
                   --arg description "$DESC" \
                   '{state:$state, context:$context, description:$description}')"
 
-      # ✅ Dispatch internal workflow (no alignment)
-      - name: Trigger internal workflow via workflow_dispatch (Ready transition only)
-        if: github.event.action == 'ready_for_review' && github.event.pull_request.draft == false
+      # Dispatch internal workflow for ALL non-draft events (opened, ready_for_review, synchronize, reopened)
+      - name: Trigger internal workflow via workflow_dispatch (non-draft PRs only)
+        if: github.event.pull_request.draft == false && github.event.action != 'closed'
         env:
           GHES_PAT: ${{ secrets.GHES_PAT }}
           TARGET_OWNER: qranium
@@ -199,7 +199,7 @@ jobs:
           fi
           echo "✅ workflow_dispatch accepted (204 No Content)"
 
-      # 🔚 Cleanup when upstream PR closes
+      # Cleanup when upstream PR closes
       - name: Close GHES PR and delete mirrored branch (cleanup)
         if: github.event.action == 'closed'
         env:
@@ -228,7 +228,7 @@ jobs:
             else
               echo "No GHES PR found for ${BRANCH} (already closed or never created)."
             fi
-          else
+                   else
             echo "Pulls query failed HTTP=${HTTP_CODE}; payload:"
             echo "$JSON"
           fi
