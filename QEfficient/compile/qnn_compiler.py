@@ -6,7 +6,7 @@
 # -----------------------------------------------------------------------------
 
 import hashib
-import json
+import jso
 import os
 import shutil
 from typing import Dict, List, Optiol
