@@ -6,7 +6,6 @@
 # -----------------------------------------------------------------------------
 
 import argparse
-
 from datasets import load_dataset
 from transformers import AutoProcessor
 
