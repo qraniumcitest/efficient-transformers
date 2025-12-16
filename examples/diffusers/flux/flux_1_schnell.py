@@ -14,7 +14,6 @@ speed with minimal quality loss.
 """
 
 import torch
-
 from QEfficient import QEffFluxPipeline
 
 # Initialize the FLUX.1-schnell pipeline from pretrained weights
