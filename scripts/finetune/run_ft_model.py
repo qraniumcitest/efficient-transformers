@@ -9,7 +9,7 @@ import logging
 import os
 import warnings
 
-import torch
+import tor
 from peft import AutoPeftModelForCausalLM
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
