@@ -1,8 +1,8 @@
+
 name: Mirror Fork PRs to GHES
 
 on:
   pull_request:
-    # PR created, draft→ready transition, commits, reopen, close
     types: [opened, ready_for_review, synchronize, reopened, closed]
     branches: ["main"]
 
@@ -19,15 +19,15 @@ jobs:
       GHES_OWNER: qranium
       GHES_REPO: efficient-transformers
 
-      # External fork repo context (unchanged; used by status/dispatch)
-      FORK_OWNER: "qraniumcitest"
-      FORK_REPO: "efficient-transformers"
+      # External fork context (used by status/dispatch)
+      FORK_OWNER: qraniumcitest
+      FORK_REPO: efficient-transformers
 
-      # Accept headers (GH REST + preview where useful)
+      # REST Accept headers
       GH_ACCEPT: "application/vnd.github+json, application/vnd.github.shadow-cat-preview+json"
 
       # Team policy: always squash+merge on GHES
-      GHES_MERGE_METHOD: squash  # allowed: squash | merge 
+      GHES_MERGE_METHOD: squash
 
     steps:
       - name: Exit if running in internal repo
@@ -85,7 +85,7 @@ jobs:
           git push ghes "HEAD:refs/heads/${BRANCH}" --force
           echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
 
-      # Canonical, body-free metadata strategy: use title only (no body parsing)
+      # Canonical, body-free metadata strategy: use title only
       - name: Ensure GHES PR title exists and is canonical
         if: github.event.action != 'closed'
         id: ensure_pr
@@ -175,7 +175,6 @@ jobs:
                  "${API_PR}/ready_for_review" >/dev/null || true
           fi
 
-      # Dispatch ONLY for Draft→Ready (not for commits while Ready)
       - name: Trigger internal workflow via workflow_dispatch (only on Ready transition)
         if: github.event.action == 'ready_for_review' && github.event.pull_request.draft == false
         env:
@@ -189,7 +188,7 @@ jobs:
           set -euo pipefail
           API_BASE="https://github.qualcomm.com/api/v3/repos/${TARGET_OWNER}/${TARGET_REPO}"
 
-          # 1) Find workflow ID from workflow file name
+          # Find workflow ID
           WF_LIST="$(curl -sS -H "Authorization: token ${GHES_PAT}" -H "Accept: application/vnd.github+json" \
             "${API_BASE}/actions/workflows")"
           WF_ID="$(printf '%s' "${WF_LIST}" | jq -r --arg name "${WORKFLOW_FILE_NAME}" \
@@ -201,19 +200,11 @@ jobs:
             exit 1
           fi
 
-          # 2) External and internal PR numbers + SHA
           EXT_PR="${{ github.event.pull_request.number }}"
           SHA="${{ github.event.pull_request.head.sha }}"
           INT_PR="${{ steps.ensure_pr.outputs.existing_pr }}"
 
-          echo "External PR: ${EXT_PR}"
-          echo "Internal GHES PR: ${INT_PR}"
-          echo "Head SHA: ${SHA}"
-
-          # 3) Dispatch internal workflow with correct mapping:
-          #    - pr_number   = internal GHES PR id
-          #    - external_pr = external PR id
-          #    - head_sha    = external head SHA
+          echo "Dispatching internal workflow id=${WF_ID} with PR=${INT_PR} extPR=${EXT_PR} sha=${SHA}"
           DISPATCH_URL="${API_BASE}/actions/workflows/${WF_ID}/dispatches"
           HTTP_CODE="$(curl -sS -o /tmp/dispatch.out -w "%{http_code}" \
             -X POST -H "Authorization: token ${GHES_PAT}" -H "Accept: application/vnd.github+json" \
@@ -224,19 +215,18 @@ jobs:
                   --arg ext_pr "${EXT_PR}" \
                   --arg sha "${SHA}" \
                   '{ref: $ref, inputs: {pr_number: $int_pr, external_pr: $ext_pr, head_sha: $sha}}')" )"
+          [ "${HTTP_CODE}" = "204" ] || { echo "❌ workflow_dispatch failed (HTTP ${HTTP_CODE})"; cat /tmp/dispatch.out || true; exit 1; }
+          echo "✅ workflow_dispatch accepted (204)"
 
-          if [ "${HTTP_CODE}" != "204" ]; then
-            echo "❌ workflow_dispatch failed (HTTP ${HTTP_CODE})"
-            [ -f /tmp/dispatch.out ] && cat /tmp/dispatch.out || true
-            exit 1
-          fi
-          echo "✅ workflow_dispatch accepted (204 No Content)"
-
-      # 🔚 Upstream closed → propagate to GHES (merge-or-close) and cleanup
-      - name: Propagate upstream closure to GHES (squash + auto-update + cleanup)
+      # 🔚 Upstream closed → propagate to GHES (wait, gate, merge, cleanup)
+      - name: Propagate upstream closure to GHES (wait, gate, merge, cleanup)
         if: github.event.action == 'closed'
         env:
           GHES_PAT:  ${{ secrets.GHES_PAT  }}
+          TARGET_OWNER: qranium
+          TARGET_REPO: efficient-transformers
+          TARGET_REF: main
+          WORKFLOW_FILE_NAME: post_feedback_to_gh_pr.yml
         shell: bash
         run: |
           set -euo pipefail
@@ -246,68 +236,142 @@ jobs:
           MERGED="${{ github.event.pull_request.merged }}"
           echo "Upstream PR #${PR_NUM} closed; merged=${MERGED}; branch=${BRANCH}"
 
+          # Guard: only proceed to merge if upstream actually merged
+          if [ "${MERGED}" != "true" ]; then
+            echo "Upstream PR closed without merge → (policy) close mirrored GHES PR."
+            RESP="$(curl -sS -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
+                      "${API_BASE}/pulls?state=all&head=${GHES_OWNER}:${BRANCH}")"
+            PR_ID="$(printf '%s' "$RESP" | jq -r 'if type=="array" and length>0 then .[0].number else empty end')"
+            if [ -n "$PR_ID" ]; then
+              curl -sS -X PATCH -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
+                "${API_BASE}/pulls/${PR_ID}" -d '{"state":"closed"}' >/dev/null || true
+            fi
+            echo "Done (no merge)."
+            exit 0
+          fi
+
           # 1) Locate GHES PR for the mirrored branch
           RESP="$(curl -sS -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
                     "${API_BASE}/pulls?state=all&head=${GHES_OWNER}:${BRANCH}" -w "\n%{http_code}" || echo)"
           HTTP_CODE="$(printf '%s\n' "$RESP" | tail -n1)"
           JSON="$(printf '%s\n' "$RESP" | sed '$d')"
           echo "Locate GHES PR HTTP=${HTTP_CODE}"
-          [ -n "$JSON" ] && echo "$JSON" | jq -r '.[0] // {}' || true
-
-          if [ "${HTTP_CODE}" != "200" ]; then
-            echo "Pulls query failed HTTP=${HTTP_CODE}"; echo "$JSON"
-          else
-            PR_ID="$(printf '%s' "$JSON" | jq -r 'if type=="array" and length>0 then .[0].number else empty end')"
-            if [ -n "$PR_ID" ]; then
-              if [ "${MERGED}" = "true" ]; then
-                echo "Attempting GHES merge of PR #${PR_ID} (method=${GHES_MERGE_METHOD})"
-
-                # 2) Try update-branch first (best-effort; succeeds only if allowed by repo settings)
-                UPDATE_CODE="$(curl -sS -o /tmp/update.out -w "%{http_code}" -X PUT \
-                  -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
-                  "${API_BASE}/pulls/${PR_ID}/update-branch" -d '{}' || echo "000")"
-                echo "Update-branch HTTP=${UPDATE_CODE}"
-                [ -f /tmp/update.out ] && sed -n '1,120p' /tmp/update.out || true
-
-                # 3) Attempt merge (squash)
-                MERGE_CODE="$(curl -sS -o /tmp/merge.out -w "%{http_code}" -X PUT \
-                  -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
-                                   "${API_BASE}/pulls/${PR_ID}/merge" \
-                  -d "$(jq -n \
-                        --arg m "${GHES_MERGE_METHOD}" \
-                        --arg t "Mirror of upstream merge for fork PR #${PR_NUM}" \
-                        '{merge_method:$m, commit_title:$t}')" || echo "000")"
-                echo "GHES merge HTTP=${MERGE_CODE}"
-                [ -f /tmp/merge.out ] && sed -n '1,200p' /tmp/merge.out || true
-
-                # 4) Fallback if merge fails (e.g., 409 conflict / protections / pre-receive hook)
-                if [ "${MERGE_CODE}" -lt 200 ] || [ "${MERGE_CODE}" -ge 300 ]; then
-                  echo "Merge failed → closing GHES PR #${PR_ID} to avoid dangling state"
-                  curl -sS -X PATCH \
-                    -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
-                    "${API_BASE}/pulls/${PR_ID}" \
-                    -d '{"state":"closed"}' >/dev/null || true
-                fi
-              else
-                echo "Upstream PR closed without merge → closing GHES PR #${PR_ID}"
-                curl -sS -X PATCH \
-                  -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
-                  "${API_BASE}/pulls/${PR_ID}" \
-                  -d '{"state":"closed"}' >/dev/null || true
-              fi
-            else
-              echo "No GHES PR found for ${BRANCH} (already closed/merged or never created)."
-            fi
+          PR_ID="$(printf '%s' "$JSON" | jq -r 'if type=="array" and length>0 then .[0].number else empty end')"
+          if [ -z "$PR_ID" ]; then
+            echo "No GHES PR found for ${BRANCH}."
+            exit 0
           fi
 
-          # 5) Delete mirrored branch (idempotent)
+          # 2) Get current head and call update-branch (best-effort)
+          PR_FILE="$(mktemp)"
+          CODE_PR="$(curl -sS -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
+                       -w "%{http_code}" -o "${PR_FILE}" "${API_BASE}/pulls/${PR_ID}")"
+          OLD_SHA="$(jq -r '.head.sha // empty' "${PR_FILE}")"
+          echo "Current GHES head sha=${OLD_SHA}"
+
+          UPDATE_CODE="$(curl -sS -o /tmp/update.out -w "%{http_code}" -X PUT \
+            -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
+            "${API_BASE}/pulls/${PR_ID}/update-branch" -d '{}' || echo "000")"
+          echo "Update-branch HTTP=${UPDATE_CODE}"
+          [ -f /tmp/update.out ] && sed -n '1,120p' /tmp/update.out || true
+
+          # 3) Poll for update completion (new head or mergeable_state: clean)
+          NEW_SHA=""
+          MERGEABLE_STATE=""
+          MAX=40  # ~80s
+          for i in $(seq 1 $MAX); do
+            S_FILE="$(mktemp)"
+            C="$(curl -sS -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
+                    -w "%{http_code}" -o "${S_FILE}" "${API_BASE}/pulls/${PR_ID}")"
+            if [ "${C}" -ge 200 ] && [ "${C}" -lt 300 ]; then
+              NEW_SHA="$(jq -r '.head.sha // empty' "${S_FILE}")"
+              MERGEABLE_STATE="$(jq -r '.mergeable_state // empty' "${S_FILE}")"
+              echo "Poll #$i → head=${NEW_SHA} mergeable_state=${MERGEABLE_STATE}"
+              if { [ -n "${OLD_SHA}" ] && [ "${NEW_SHA}" != "${OLD_SHA}" ]; } || [ "${MERGEABLE_STATE}" = "clean" ]; then
+                break
+              fi
+            fi
+            sleep 2
+          done
+          if [ -z "${NEW_SHA}" ]; then NEW_SHA="${OLD_SHA}"; fi
+
+          # 4) Post qeff/ready=success on NEW_SHA (satisfy hooks/protections needing a status on the tip)
+          if [ -n "${NEW_SHA}" ]; then
+            echo "Posting qeff/ready=success on ${NEW_SHA}"
+            curl -sS -X POST \
+              -H "Authorization: token ${GHES_PAT}" -H "Accept: application/vnd.github+json" \
+              "${GHES_BASE_URL}/api/v3/repos/${GHES_OWNER}/${GHES_REPO}/statuses/${NEW_SHA}" \
+              -d "$(jq -n \
+                    --arg state "success" \
+                    --arg context "qeff/ready" \
+                    --arg description "Upstream PR merged; GHES branch updated" \
+                    '{state:$state, context:$context, description:$description}')" \
+              >/dev/null || true
+          fi
+
+          # 5) (Optional) dispatch internal workflow to run checks on NEW_SHA, then gate
+          WF_LIST="$(curl -sS -H "Authorization: token ${GHES_PAT}" -H "Accept: application/vnd.github+json" \
+            "${API_BASE}/actions/workflows")"
+          WF_ID="$(printf '%s' "${WF_LIST}" | jq -r --arg name "${WORKFLOW_FILE_NAME}" \
+            '.workflows[] | select(.path | endswith($name)) | .id')"
+          if [ -n "${WF_ID}" ] && [ "${WF_ID}" != "null" ]; then
+            echo "Dispatching internal workflow id=${WF_ID} for PR=${PR_ID} sha=${NEW_SHA}"
+            DISPATCH_URL="${API_BASE}/actions/workflows/${WF_ID}/dispatches"
+            D_CODE="$(curl -sS -o /tmp/dispatch.out -w "%{http_code}" \
+              -X POST -H "Authorization: token ${GHES_PAT}" -H "Accept: application/vnd.github+json" \
+              "${DISPATCH_URL}" \
+              -d "$(jq -n --arg ref "${TARGET_REF}" \
+                    --arg int_pr "${PR_ID}" --arg ext_pr "${PR_NUM}" --arg sha "${NEW_SHA}" \
+                    '{ref: $ref, inputs: {pr_number: $int_pr, external_pr: $ext_pr, head_sha: $sha}}')" || echo "000")"
+            echo "workflow_dispatch HTTP=${D_CODE}"
+            [ -f /tmp/dispatch.out ] && sed -n '1,200p' /tmp/dispatch.out || true
+          else
+            echo "Internal workflow '${WORKFLOW_FILE_NAME}' not found; skipping dispatch."
+          fi
+
+          # 6) Gate on statuses and check suites for NEW_SHA (up to ~90s)
+          READY="no"
+          OK_S=""; OK_C=""
+          MAX_GATE=45
+          for i in $(seq 1 $MAX_GATE); do
+            API_STAT="${GHES_BASE_URL}/api/v3/repos/${GHES_OWNER}/${GHES_REPO}/commits/${NEW_SHA}/statuses"
+            API_CHECKS="${GHES_BASE_URL}/api/v3/repos/${GHES_OWNER}/${GHES_REPO}/commits/${NEW_SHA}/check-suites"
+            RESP_S="$(curl -sS -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" "$API_STAT" || true)"
+            OK_S="$(printf '%s' "$RESP_S" | jq -r '[.[] | select(.context=="qeff/ready")] | first | .state // empty' || true)"
+            RESP_C="$(curl -sS -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" "$API_CHECKS" || true)"
+            OK_C="$(printf '%s' "$RESP_C" | jq -r '[.check_suites[] | select(.status=="completed")] | all(.conclusion=="success")')"
+            echo "Gate poll #$i → status=${OK_S:-none} checks=${OK_C:-none}"
+            if [ "$OK_S" = "success" ] && [ "$OK_C" = "true" ]; then READY="yes"; break; fi
+            sleep 2
+          done
+          echo "Gate result → READY=${READY}"
+          if [ "${READY}" != "yes" ]; then
+            echo "Checks not green; leaving GHES PR #${PR_ID} open for retry. (No branch delete)"
+            exit 0
+          fi
+
+          # 7) Attempt merge (squash)
+          MERGE_CODE="$(curl -sS -o /tmp/merge.out -w "%{http_code}" -X PUT \
+            -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
+            "${API_BASE}/pulls/${PR_ID}/merge" \
+            -d "$(jq -n \
+                  --arg m "${GHES_MERGE_METHOD}" \
+                  --arg t "Mirror of upstream merge for fork PR #${PR_NUM}" \
+                  '{merge_method:$m, commit_title:$t}')" || echo "000")"
+          echo "GHES merge HTTP=${MERGE_CODE}"
+          [ -f /          [ -f /tmp/merge.out ] && sed -n '1,200p' /tmp/merge.out || true
+
+          if [ "${MERGE_CODE}" -lt 200 ] || [ "${MERGE_CODE}" -ge 300 ]; then
+            echo "Merge failed; keeping GHES PR #${PR_ID} open and preserving branch for retry."
+            exit 0
+          fi
+
+          # 8) Delete mirrored branch only after successful merge
           echo "Deleting branch ${BRANCH}"
           DEL_CODE="$(curl -sS -o /tmp/del.out -w "%{http_code}" \
-            -X DELETE \
-            -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
+            -X DELETE -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
             "${API_BASE}/git/refs/heads/${BRANCH}")"
           echo "Branch delete HTTP=${DEL_CODE}"
           [ -f /tmp/del.out ] && sed -n '1,120p' /tmp/del.out || true
           if [ "${DEL_CODE}" != "204" ] && [ "${DEL_CODE}" != "404" ]; then
             echo "Branch delete did not return 204/404 → check permissions/protections."
-
