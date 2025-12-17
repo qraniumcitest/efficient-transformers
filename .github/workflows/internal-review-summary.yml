@@ -11,16 +11,42 @@ on:
         description: "Original repo (owner/repo)"
         required: true
         type: string
-      orig_sha:
-        description: "Original head SHA"
-        required: true
-        type: string
 
 jobs:
   summarize-internal-review:
     runs-on: self-hosted
 
     steps:
+      - name: 🔎 Resolve current head SHA for PR
+        id: resolve_sha
+        env:
+          GH_TOKEN:  ${{ secrets.GITHUB_TOKEN }}
+          ORIG_REPO: ${{ inputs.orig_repo }}
+          PR_NUM:    ${{ inputs.pr_number }}
+        run: |
+          set -euo pipefail
+
+          echo "Resolving head SHA for ${ORIG_REPO} PR #${PR_NUM}"
+
+          PR_JSON="$(curl -sS -H "Authorization: Bearer ${GH_TOKEN}" \
+                          -H "Accept: application/vnd.github+json" \
+                          "https://api.github.com/repos/${ORIG_REPO}/pulls/${PR_NUM}")"
+
+          HEAD_SHA="$(echo "${PR_JSON}" | jq -r '.head.sha')"
+          HEAD_REF="$(echo "${PR_JSON}" | jq -r '.head.ref')"
+
+          if [ -z "${HEAD_SHA}" ] || [ "${HEAD_SHA}" = "null" ]; then
+            echo "ERROR: Could not resolve head.sha from PR API response"
+            echo "${PR_JSON}" | head -c 400 || true
+            exit 1
+          fi
+
+          echo "Current head.ref = ${HEAD_REF}"
+          echo "Current head.sha = ${HEAD_SHA}"
+
+          echo "head_sha=${HEAD_SHA}" >> "$GITHUB_OUTPUT"
+          echo "head_ref=${HEAD_REF}" >> "$GITHUB_OUTPUT"
+
       - name: 🛠 Setup internal review context
         id: setup
         run: |
@@ -28,7 +54,7 @@ jobs:
 
           echo "PR number : ${{ inputs.pr_number }}"
           echo "Repo      : ${{ inputs.orig_repo }}"
-          echo "Head SHA  : ${{ inputs.orig_sha }}"
+          echo "Head SHA  : ${{ steps.resolve_sha.outputs.head_sha }}"
           echo
 
           # Locate internal-review JSON on NFS
@@ -123,7 +149,7 @@ jobs:
         env:
           GH_TOKEN:       ${{ secrets.GITHUB_TOKEN }}
           ORIG_REPO:      ${{ inputs.orig_repo }}
-          ORIG_SHA:       ${{ inputs.orig_sha }}
+          ORIG_SHA:       ${{ steps.resolve_sha.outputs.head_sha }}
           WORST_SEVERITY: ${{ steps.analyze.outputs.highest_severity }}
           GITHUB_REPO:    ${{ github.repository }}
           GITHUB_RUN_ID:  ${{ github.run_id }}
