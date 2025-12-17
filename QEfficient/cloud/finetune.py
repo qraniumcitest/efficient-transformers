@@ -4,7 +4,6 @@
 # SPDX-License-Identifier: BSD-3-Clause
 #
 # -----------------------------------------------------------------------------
-
 import logging
 import random
 import warnings
