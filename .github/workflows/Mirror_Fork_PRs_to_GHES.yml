@@ -27,7 +27,7 @@ jobs:
       # Accept headers (GH REST + preview where useful)
       GH_ACCEPT: "application/vnd.github+json, application/vnd.github.shadow-cat-preview+json"
 
-      # NEW: choose how GHES should merge when upstream PR was merged
+      # Team policy: always squash+merge on GHES
       GHES_MERGE_METHOD: squash  # allowed: squash | merge | rebase
 
     steps:
@@ -49,8 +49,8 @@ jobs:
       - name: Preflight - verify GHES env and connectivity
         run: |
           set -e
-          nslookup github.qualcomm.com || (echo "DNS lookup failed. Connect VPN then re-run"; exit 1)
-          curl -I --max-time 10 "https://github.qualcomm.com" || (echo "Cannot reach GHES over HTTPS. Connect VPN then re-run"; exit 1)
+          nslookup github.qualcomm.com || { echo "DNS lookup failed. Connect VPN then re-run"; exit 1; }
+          curl -I --max-time 10 "https://github.qualcomm.com" || { echo "Cannot reach GHES over HTTPS. Connect VPN then re-run"; exit 1; }
 
       - name: Checkout PR head
         if: github.event.action != 'closed'
@@ -262,12 +262,13 @@ jobs:
               if [ "${MERGED}" = "true" ]; then
                 echo "Attempting GHES merge of PR #${PR_ID} (method=${GHES_MERGE_METHOD})"
 
-                # Optional: try update-branch first (if repo setting allows auto-update)
-                # UPDATE_CODE="$(curl -sS -o /tmp/update.out -w "%{http_code}" -X PUT \
-                #   -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
-                #   "${API_BASE}/pulls/${PR_ID}/update-branch" -d '{}' || echo "000")"
-                # echo "Update-branch HTTP=${UPDATE_CODE}"
+                # Try update-branch first (best-effort; succeeds only if allowed in repo settings)
+                UPDATE_CODE="$(curl -sS -o /tmp/update.out -w "%{http_code}" -X PUT \
+                  -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
+                  "${API_BASE}/pulls/${PR_ID}/update-branch" -d '{}' || echo "000")"
+                echo "Update-branch HTTP=${UPDATE_CODE}"
 
+                # Attempt merge (squash)
                 MERGE_CODE="$(curl -sS -o /tmp/merge.out -w "%{http_code}" -X PUT \
                   -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
                   "${API_BASE}/pulls/${PR_ID}/merge" \
@@ -283,7 +284,7 @@ jobs:
                   echo "Falling back to closing GHES PR #${PR_ID}"
                   curl -sS -X PATCH \
                     -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
-                    "${API_BASE}/pulls/${PR_ID}" \
+                    "${API_BASE}/pulls/${PR                    "${API_BASE}/pulls/${PR_ID}" \
                     -d '{"state":"closed"}' >/dev/null || true
                 fi
               else
@@ -305,6 +306,7 @@ jobs:
             "${API_BASE}/git/refs/heads/${BRANCH}")"
           if [ "${DEL_CODE}" = "204" ] || [ "${DEL_CODE}" = "404" ]; then
             echo "Branch delete completed (HTTP ${DEL_CODE})"
-                   else
+          else
             echo "Branch delete returned HTTP ${DEL_CODE}"
             cat /tmp/del.out || true
+
