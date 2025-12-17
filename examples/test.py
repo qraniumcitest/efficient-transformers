@@ -3,6 +3,7 @@ import sys,math,random,json,time,datetime,pickle,itertools,functools,os,re
 
 A = [  11,10,42,7,7,3,-1,0,1,4,9  ]
 A.sort()
+
 TARGETS = [7,42,3,999, -1, 11, 0, 123456, 9, 4, 10]
 
 def BINARYSEARCH___(a   ,x):
