@@ -4,9 +4,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 #
 # -----------------------------------------------------------------------------
-
 from types import SimpleNamespace
-
 import onnx
 import pytest
 
