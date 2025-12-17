@@ -8,101 +8,113 @@ pipeline {
         disableConcurrentBuilds()
     }
 
-   stages {
-       stage('Install QEfficient') {
-           steps {
-               sh '''
-                   . ~/.bashrc
-                   sudo docker run --privileged -dit --name ${BUILD_TAG} -e HF_TOKEN=${HF_TOKEN} -v ./:/efficient-transformers -v ${HF_PATH}:${DOCKER_HF_PATH} ${DOCKER_LATEST}:master_latest
-                   sudo docker exec ${BUILD_TAG} bash -c "
-                   cd /efficient-transformers &&
-                   apt update &&
-                   apt install -y python3.10-venv &&
-                   python3.10 -m venv preflight_qeff &&
-                   . preflight_qeff/bin/activate &&
-                   pip install --upgrade pip setuptools &&
-                   pip install .[test] &&
-                   pip install .[diffusers] &&
-                   pip install junitparser pytest-xdist &&
-                   pip install librosa==0.10.2 soundfile==0.13.1 && #packages needed to load example for whisper testing
-                   pip install --extra-index-url https://download.pytorch.org/whl/cpu timm==1.0.14 torchvision==0.22.0+cpu einops==0.8.1 && #packages to load VLMs
-                   rm -rf QEfficient"
-               '''
-           }
-       }
-       stage('Non CLI Tests') {
-           parallel {
-               stage('Run Non-CLI Non-QAIC Tests') {
-                   steps {
-                       timeout(time: 40, unit: 'MINUTES') {
-                           sh '''
-                           sudo docker exec ${BUILD_TAG} bash -c "
-                           cd /efficient-transformers &&
-                           . preflight_qeff/bin/activate &&
-                           mkdir -p $PWD/Non_cli_qaic &&
-                           export TOKENIZERS_PARALLELISM=false &&
-                           export QEFF_HOME=$PWD/Non_cli_qaic &&
-                           pytest tests -m '(not cli) and (not on_qaic) and (not finetune)' --ignore tests/vllm -n 4 --junitxml=tests/tests_log1.xml &&
-                           junitparser merge tests/tests_log1.xml tests/tests_log.xml &&
-                           deactivate"
-                           '''
-                       }
-                   }
-               }
-               stage('Run Non-CLI QAIC Tests') {
-                   steps {
-                       timeout(time: 200, unit: 'MINUTES') {
-                           sh '''
-                           sudo docker exec ${BUILD_TAG} bash -c "
-                           cd /efficient-transformers &&
-                           . preflight_qeff/bin/activate &&
-                           mkdir -p $PWD/Non_qaic &&
-                           export TOKENIZERS_PARALLELISM=false &&
-                           export QEFF_HOME=$PWD/Non_qaic &&
-                           pytest tests -m '(not cli) and (on_qaic) and (not nightly) and (not multimodal) and (not qnn) and (not finetune)' --ignore tests/vllm --junitxml=tests/tests_log2.xml &&
-                           junitparser merge tests/tests_log2.xml tests/tests_log.xml &&
-                           deactivate"
-                           '''
-                       }
-                   }
-               }
-           }
-       }
-       stage('QAIC MultiModal Tests') {
-                   steps {
-                       timeout(time: 120, unit: 'MINUTES') {
-                           sh '''
-                           sudo docker exec ${BUILD_TAG} bash -c "
-                           cd /efficient-transformers &&
-                           . preflight_qeff/bin/activate &&
-                           mkdir -p $PWD/Non_cli_qaic_multimodal &&
-                           export TOKENIZERS_PARALLELISM=false &&
-                           export QEFF_HOME=$PWD/Non_cli_qaic_multimodal &&
-                           pytest tests -m '(not cli) and (on_qaic) and (multimodal) and (not qnn) and (not finetune)' --ignore tests/vllm --junitxml=tests/tests_log6.xml &&
-                           junitparser merge tests/tests_log6.xml tests/tests_log.xml &&
-                           deactivate"
-                           '''
-                       }
-                   }
+  stages {
+        stage('Checkout') {
+            steps {
+                deleteDir()
+                git url: 'https://github.com/qraniumcitest/efficient-transformers.git', branch: 'main'
+                script {
+                    if (params.commit_sha?.trim()) {
+                        sh "git checkout ${params.commit_sha} && whoami"
+                        echo "Checked out commit: ${params.commit_sha}"
+                    }
+                }
+            }
         }
-       stage('Inference Tests') {
-                   steps {
+      stage('Install QEfficient') {
+          steps {
+              sh '''
+                  . ~/.bashrc
+                  sudo docker run --privileged -dit --name ${BUILD_TAG} -e HF_TOKEN=${HF_TOKEN} -v ./:/efficient-transformers -v ${HF_PATH}:${DOCKER_HF_PATH} ${DOCKER_LATEST}:master_latest
+                  sudo docker exec ${BUILD_TAG} bash -c "
+                  cd /efficient-transformers &&
+                  apt update &&
+                  apt install -y python3.10-venv &&
+                  python3.10 -m venv preflight_qeff &&
+                  . preflight_qeff/bin/activate &&
+                  pip install --upgrade pip setuptools &&
+                  pip install .[test] &&
+                   pip install .[diffusers] &&
+                  pip install junitparser pytest-xdist &&
+                  pip install librosa==0.10.2 soundfile==0.13.1 && #packages needed to load example for whisper testing
+                  pip install --extra-index-url https://download.pytorch.org/whl/cpu timm==1.0.14 torchvision==0.22.0+cpu einops==0.8.1 && #packages to load VLMs
+                  rm -rf QEfficient"
+              '''
+          }
+      }
+      stage('Non CLI Tests') {
+          parallel {
+              stage('Run Non-CLI Non-QAIC Tests') {
+                  steps {
+                       timeout(time: 40, unit: 'MINUTES') {
+                          sh '''
+                          sudo docker exec ${BUILD_TAG} bash -c "
+                          cd /efficient-transformers &&
+                          . preflight_qeff/bin/activate &&
+                          mkdir -p $PWD/Non_cli_qaic &&
+                          export TOKENIZERS_PARALLELISM=false &&
+                          export QEFF_HOME=$PWD/Non_cli_qaic &&
+                           pytest tests -m '(not cli) and (not on_qaic) and (not finetune)' --ignore tests/vllm -n 4 --junitxml=tests/tests_log1.xml &&
+                          junitparser merge tests/tests_log1.xml tests/tests_log.xml &&
+                          deactivate"
+                          '''
+                      }
+                  }
+              }
+              stage('Run Non-CLI QAIC Tests') {
+                  steps {
+                      timeout(time: 200, unit: 'MINUTES') {
+                          sh '''
+                          sudo docker exec ${BUILD_TAG} bash -c "
+                          cd /efficient-transformers &&
+                          . preflight_qeff/bin/activate &&
+                          mkdir -p $PWD/Non_qaic &&
+                          export TOKENIZERS_PARALLELISM=false &&
+                          export QEFF_HOME=$PWD/Non_qaic &&
+                          pytest tests -m '(not cli) and (on_qaic) and (not nightly) and (not multimodal) and (not qnn) and (not finetune)' --ignore tests/vllm --junitxml=tests/tests_log2.xml &&
+                          junitparser merge tests/tests_log2.xml tests/tests_log.xml &&
+                          deactivate"
+                          '''
+                      }
+                  }
+              }
+          }
+      }
+      stage('QAIC MultiModal Tests') {
+                  steps {
                        timeout(time: 120, unit: 'MINUTES') {
-                           sh '''
-                           sudo docker exec ${BUILD_TAG} bash -c "
+                          sh '''
+                          sudo docker exec ${BUILD_TAG} bash -c "
+                          cd /efficient-transformers &&
+                          . preflight_qeff/bin/activate &&
+                          mkdir -p $PWD/Non_cli_qaic_multimodal &&
+                          export TOKENIZERS_PARALLELISM=false &&
+                          export QEFF_HOME=$PWD/Non_cli_qaic_multimodal &&
+                          pytest tests -m '(not cli) and (on_qaic) and (multimodal) and (not qnn) and (not finetune)' --ignore tests/vllm --junitxml=tests/tests_log6.xml &&
+                          junitparser merge tests/tests_log6.xml tests/tests_log.xml &&
+                          deactivate"
+                          '''
+                      }
+                  }
+        }
+      stage('Inference Tests') {
+                  steps {
+                       timeout(time: 120, unit: 'MINUTES') {
+                          sh '''
+                          sudo docker exec ${BUILD_TAG} bash -c "
                     	   #source /qnn_sdk/bin/envsetup.sh &&
                       	   #source /qnn_sdk/bin/envcheck -c &&
-                           cd /efficient-transformers &&
-                           . preflight_qeff/bin/activate &&
-                           mkdir -p $PWD/cli &&
-                           export TOKENIZERS_PARALLELISM=false &&
-                           export QEFF_HOME=$PWD/cli &&
-                           pytest tests -m '(cli and not qnn) and (not finetune)' --ignore tests/vllm --junitxml=tests/tests_log3.xml &&
-                           junitparser merge tests/tests_log3.xml tests/tests_log.xml &&
-                           deactivate"
-                           '''
-                       }
-                   }
+                          cd /efficient-transformers &&
+                          . preflight_qeff/bin/activate &&
+                          mkdir -p $PWD/cli &&
+                          export TOKENIZERS_PARALLELISM=false &&
+                          export QEFF_HOME=$PWD/cli &&
+                          pytest tests -m '(cli and not qnn) and (not finetune)' --ignore tests/vllm --junitxml=tests/tests_log3.xml &&
+                          junitparser merge tests/tests_log3.xml tests/tests_log.xml &&
+                          deactivate"
+                          '''
+                      }
+                  }
         }
         // stage('QNN CLI Tests') {
         //     steps {
@@ -116,7 +128,7 @@ pipeline {
         //             mkdir -p $PWD/Qnn_cli &&
         //             export TOKENIZERS_PARALLELISM=false &&
         //             export QEFF_HOME=$PWD/Qnn_cli &&
-        //             pytest tests -m '(cli and qnn) and (not finetune)' --ignore tests/vllm --junitxml=tests/tests_log4.xml &&
+        //             pytest tests -m '(cli and qnn) and (not finetune)' --ignore tests/vllm -n 4 --junitxml=tests/tests_log4.xml &&
         //             junitparser merge tests/tests_log4.xml tests/tests_log.xml &&
         //             deactivate"
         //             '''
@@ -191,35 +203,6 @@ pipeline {
         //         ],
         //         wait: false
         // }
-        always {
-            script {
-                try {
-                    sh '''
-                    sudo chown -R ubuntu .
-                    '''
-                } catch (error) {
-                    echo "Failed to change ownership: ${error}"
-                }
-            }
-            script {
-                try {
-                    junit testResults: 'tests/tests_log.xml', allowEmptyResults: true
-                } catch (error) {
-                    echo "No test results file found or parsing failed: ${error}"
-                }
-            }
-            script {
-                try {
-                    sh '''
-                    sudo docker rm -f ${BUILD_TAG}
-                    '''
-                } catch (error) {
-                    echo "Failed to delete container ${BUILD_TAG}: ${error}"
-                }
-            }
-            echo 'Cleaning Workspace'
-            deleteDir()
-        }
         // unsuccessful {
         //     script {
         //         try {
@@ -233,5 +216,73 @@ pipeline {
         //     echo 'Cleaning Workspace'
         //     deleteDir()
         // }
+        always {
+            script {
+                // Minimal fields for the GitHub Statuses API
+                def state     = currentBuild.currentResult == 'SUCCESS' ? 'success' : 'failure'
+                def targetUrl = env.BUILD_URL
+
+                // Status target (external repo + commit); keep your fallbacks
+                def statusRepo = (env.orig_repo?.trim()) ?: 'qraniumcitest/efficient-transformers'
+                def fullSha    = (env.orig_sha?.trim())  ?: (env.commit_sha?.trim())
+
+                // Keep your existing token variable as-is
+                def githubToken = env.githubToken
+
+                if (!statusRepo || !statusRepo.contains('/')) {
+                    error("Invalid status target repo: '${statusRepo}' (expected owner/repo)")
+                }
+                if (!fullSha || fullSha.length() < 40) {
+                    // If you prefer to skip normalization, remove this check.
+                    // Otherwise normalize to 40 chars (optional):
+                    sh """
+                    bash -e -o pipefail -c '
+                        FULL_SHA=\$(git rev-parse --verify ${fullSha}^{commit} 2>/dev/null || echo ${fullSha})
+                        echo "\$FULL_SHA" > .full_sha
+                    '
+                    """
+                    fullSha = readFile('.full_sha').trim()
+                }
+                if (fullSha.length() != 40) {
+                    error("Commit SHA must be 40 chars; got '${fullSha}' (${fullSha.length()})")
+                }
+
+                // Minimal inline JSON: only state + target_url (and context for display)
+                // def context = 'Qefficient-Transformer-Preflight'
+                // if (context.length() > 100) context = context.substring(0, 100) // API limit
+                // def body = """{"state":"${state}","context":"${context}","target_url":"${targetUrl}"}"""
+
+                // Single, concise curl (no jq, no here-doc)
+                sh """
+                    curl -sS -X POST \\
+                    -H "Authorization: token ${githubToken}" \\
+                    -H "Accept: application/vnd.github+json" \\
+                    -H "Content-Type: application/json" \\
+                    "https://api.github.com/repos/${statusRepo}/statuses/${fullSha}" \\
+                    -d '{"state":"${state}","context":"Qefficient-Transformer-Preflight","description":"Jenkins build:${state}","target_url":"${targetUrl}"}'
+                """
+
+
+                try {
+                    sh '''
+                      sudo chown -R ubuntu .
+                    '''
+                } catch (error) {
+                    echo "Failed to change ownership: ${error}"
+                }
+            }
+            junit testResults: 'tests/tests_log.xml'
+            script {
+                try {
+                    sh '''
+                    sudo docker rm -f ${BUILD_TAG}
+                    '''
+                } catch (error) {
+                    echo "Failed to delete container ${BUILD_TAG}: ${error}"
+                }
+            }
+            echo 'Cleaning Workspace'
+            deleteDir()
+        }
     }
 }
