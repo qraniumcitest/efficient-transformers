@@ -27,7 +27,7 @@ jobs:
       GH_ACCEPT: "application/vnd.github+json, application/vnd.github.shadow-cat-preview+json"
 
       # Team policy: always squash+merge on GHES
-      GHES_MERGE_METHOD: squash  # allowed: squash | merge | rebase
+      GHES_MERGE_METHOD: squash  # allowed: squash | merge 
 
     steps:
       - name: Exit if running in internal repo
