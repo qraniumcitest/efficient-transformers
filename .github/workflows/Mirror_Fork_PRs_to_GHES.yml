@@ -369,7 +369,7 @@ jobs:
           echo "Deleting branch ${BRANCH}"
           DEL_CODE="$(curl -sS -o /tmp/del.out -w "%{http_code}" \
             -X DELETE -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
-            "${API_BASE}/git/refs/heads/${            "${API_BASE}/git/refs/heads/${BRANCH}")"
+            "${API_BASE}/git/refs/heads/${BRANCH}")"
           echo "Branch delete HTTP=${DEL_CODE}"
           [ -f /tmp/del.out ] && sed -n '1,120p' /tmp/del.out || true
           if [[ "$DEL_CODE" != "204" && "$DEL_CODE" != "404" ]]; then
