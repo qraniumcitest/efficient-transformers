@@ -203,20 +203,23 @@ pipeline {
         //         ],
         //         wait: false
         // }
-        // unsuccessful {
-        //     script {
-        //         try {
-        //             sh '''
-        //             sudo docker rm -f ${BUILD_TAG}
-        //             '''
-        //         } catch (error) {
-        //             echo "Failed to delete container ${BUILD_TAG}: ${error}"
-        //         }
-        //     }
-        //     echo 'Cleaning Workspace'
-        //     deleteDir()
-        // }
         always {
+            script {
+                try {
+                    sh '''
+                    sudo chown -R ubuntu .
+                    '''
+                } catch (error) {
+                    echo "Failed to change ownership: ${error}"
+                }
+            }
+            script {
+                try {
+                    junit testResults: 'tests/tests_log.xml', allowEmptyResults: true
+                } catch (error) {
+                    echo "No test results file found or parsing failed: ${error}"
+                }
+            }
             script {
                 // Minimal fields for the GitHub Statuses API
                 def state     = currentBuild.currentResult == 'SUCCESS' ? 'success' : 'failure'
@@ -261,17 +264,7 @@ pipeline {
                     "https://api.github.com/repos/${statusRepo}/statuses/${fullSha}" \\
                     -d '{"state":"${state}","context":"Qefficient-Transformer-Preflight","description":"Jenkins build:${state}","target_url":"${targetUrl}"}'
                 """
-
-
-                try {
-                    sh '''
-                      sudo chown -R ubuntu .
-                    '''
-                } catch (error) {
-                    echo "Failed to change ownership: ${error}"
-                }
             }
-            junit testResults: 'tests/tests_log.xml'
             script {
                 try {
                     sh '''
@@ -280,9 +273,21 @@ pipeline {
                 } catch (error) {
                     echo "Failed to delete container ${BUILD_TAG}: ${error}"
                 }
+                echo 'Cleaning Workspace'
+                deleteDir()
             }
-            echo 'Cleaning Workspace'
-            deleteDir()
         }
+	    // unsuccessful {
+        //     script {
+        //         try {
+        //             sh '''
+        //             sudo docker rm -f ${BUILD_TAG}
+        //             '''
+        //         } catch (error) {
+        //             echo "Failed to delete container ${BUILD_TAG}: ${error}"
+        //         }
+        //     }
+        //     echo 'Cleaning Workspace'
+        //     deleteDir()
+        // }
     }
-}
