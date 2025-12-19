@@ -374,4 +374,5 @@ jobs:
           [ -f /tmp/del.out ] && sed -n '1,120p' /tmp/del.out || true
           if [[ "$DEL_CODE" != "204" && "$DEL_CODE" != "404" ]]; then
             echo "Branch delete did not return 204/404 → check permissions/protections."
-            
+          fi
+          echo "GHES mirror cleanup complete."
