@@ -20,7 +20,6 @@ Use this example to learn how to fine-tune FLUX.1 for your specific needs.
 """
 
 import torch
-
 from QEfficient import QEffFluxPipeline
 
 # ============================================================================
