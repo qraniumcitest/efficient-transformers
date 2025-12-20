@@ -22,6 +22,7 @@ concurrency:
 jobs:
   # ==== from first file, unchanged ====
   mirror_or_close:
+    if: github.event_name == 'pull_request'
     runs-on: [self-hosted, linux, x64]
     env:
       GHES_BASE_URL: https://github.qualcomm.com
@@ -319,7 +320,7 @@ jobs:
           # 5) (Optional) dispatch internal workflow to run checks on NEW_SHA, then gate
           WF_LIST="$(curl -sS -H "Authorization: token ${GHES_PAT}" -H "Accept: ${GH_ACCEPT}" \
             "${API_BASE}/actions/workflows")"
-          WF_ID="$(printf '%s' "${WF_LIST}" | jq -r --arg name "${WORKFLOW_FILE_NAME}" \
+          WF_ID="$(printf '%s' "${WF_LIST}" | jq-r --arg name "${WORKFLOW_FILE_NAME}" \
             '.workflows[] | select(.path | endswith($name)) | .id')"
           if [[ -n "$WF_ID" && "$WF_ID" != "null" ]]; then
             echo "Dispatching internal workflow id=${WF_ID} for PR=${PR_ID} sha=${NEW_SHA}"
@@ -368,7 +369,7 @@ jobs:
           echo "GHES merge HTTP=${MERGE_CODE}"
           [ -f /tmp/merge.out ] && sed -n '1,200p' /tmp/merge.out || true
 
-          if [[ "$MERGE_CODE" -lt 200 || "$MERGE_CODE" >= 300 ]]; then
+          if [[ "$MERGE_CODE" -lt 200 || "$MERGE_CODE" -ge 300 ]]; then
             echo "Merge failed; keeping GHES PR #${PR_ID} open and preserving branch for retry."
             exit 0
           fi
@@ -386,6 +387,7 @@ jobs:
 
   # ==== from second file, unchanged ====
   summarize-internal-review:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: self-hosted
 
     steps:
