@@ -32,7 +32,7 @@ jobs:
       TARGET_OWNER: qranium
       TARGET_REPO: efficient-transformers
       TARGET_REF: main
-      WORKFLOW_FILE_NAME: post_feedback_to_gh_pr.yml
+      WORKFLOW_FILE_NAME: internal_bridge.yml
 
     steps:
       - name: Exit if running in internal repo
