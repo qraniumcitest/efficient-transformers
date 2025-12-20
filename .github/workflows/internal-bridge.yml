@@ -1,0 +1,538 @@
+name: Internal bridge workflows (feedback + QGenie export)
+
+on:
+  pull_request:
+    types:
+      - opened
+      - ready_for_review
+      - synchronize
+      - reopened
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Internal GHES PR number (mirror PR)
+        required: true
+      head_sha:
+        description: Head commit SHA
+        required: true
+      external_pr:
+        description: External GitHub.com PR number
+        required: true
+  issue_comment:
+    types: [created, edited]
+
+# Per-PR concurrency: newest event wins (for PR / dispatch feedback job)
+concurrency:
+  group: post-feedback-to-fork-${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+  cancel-in-progress: true
+
+jobs:
+  # -----------------------------------------------------------------------------
+  # JOB 1: Post feedback to fork PR (event-driven, synchronize-always)
+  # -----------------------------------------------------------------------------
+  trigger_jenkins_on_commit:
+    name: "Post feedback for PR #${{ github.event.pull_request.number || github.event.inputs.pr_number }}"
+    runs-on: [self-hosted, linux, x64, internal]
+    permissions:
+      contents: read
+      pull-requests: read
+    env:
+      JENKINS_WEBHOOK_URL: ${{ secrets.JENKINS_WEBHOOK_URL }}
+      ORIG_OWNER: qraniumcitest
+      ORIG_REPO: efficient-transformers
+
+    steps:
+      # 0) Runner sanity
+      - name: Sanity check runner tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v jq || { echo "jq missing"; exit 2; }
+          curl -sS https://api.github.com/meta >/dev/null || { echo "Cannot reach GitHub API"; exit 2; }
+
+      # 1) Normalize context (PR # and SHA from PR or dispatch)
+      - name: Normalize context (PR # and SHA from PR or dispatch)
+        id: norm
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "pr=${{ github.event.inputs.pr_number }}" >> "$GITHUB_OUTPUT"
+            echo "sha=${{ github.event.inputs.head_sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "pr=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+            echo "sha=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # 2) Ready-for-review idempotency (per PR/action)
+      - name: Ready-for-review idempotency (per PR/action)
+        id: rfr_guard
+        if: ${{ github.event_name == 'pull_request' && github.event.action == 'ready_for_review' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          PR="${{ github.event.pull_request.number }}"
+          CACHE_DIR="$RUNNER_TEMP/rfr-trigger-cache"
+          mkdir -p "$CACHE_DIR"
+          KEY="PR-${PR}-rfr"
+          if [ -f "$CACHE_DIR/$KEY" ]; then
+            echo "skip=yes" >> "$GITHUB_OUTPUT"
+            echo "Already processed ready_for_review for PR ${PR}; skipping."
+          else
+            touch "$CACHE_DIR/$KEY"
+            echo "skip=no" >> "$GITHUB_OUTPUT"
+          fi
+
+      # 3) Per-run SHA idempotency
+      - name: Idempotency (skip if same SHA already triggered in this run)
+        id: idem
+        if: ${{ github.event_name != 'pull_request' || github.event.action != 'ready_for_review' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHA="${{ steps.norm.outputs.sha }}"
+          PR="${{ steps.norm.outputs.pr }}"
+          CACHE_DIR="$RUNNER_TEMP/jenkins-trigger-cache"
+          mkdir -p "$CACHE_DIR"
+          KEY="${PR}-${SHA}"
+          if [ -f "$CACHE_DIR/$KEY" ]; then
+            echo "skip=yes" >> "$GITHUB_OUTPUT"
+            echo "Duplicate trigger detected for PR ${PR} @ ${SHA}; skipping."
+          else
+            touch "$CACHE_DIR/$KEY"
+            echo "skip=no" >> "$GITHUB_OUTPUT"
+          fi
+
+      # 4) Gate on Statuses + Check Suites
+      - name: Commit-status gate (require qeff/ready via Status or Checks)
+        id: ready_gate
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          OWNER="${{ github.repository_owner }}"
+          REPO="${{ github.event.repository.name }}"
+          SHA="${{ steps.norm.outputs.sha }}"
+          API_STAT="${{ github.api_url }}/repos/${OWNER}/${REPO}/commits/${SHA}/statuses"
+          API_CHECKS="${{ github.api_url }}/repos/${OWNER}/${REPO}/commits/${SHA}/check-suites"
+
+          READY="no"
+          MAX=10   # ~60–80s with sleep 4
+          for i in $(seq 1 $MAX); do
+            RESP_S="$(curl -sS -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "$API_STAT" || true)"
+            OK_S="$(printf '%s' "$RESP_S" | jq -r '[.[] | select(.context=="qeff/ready")] | first | .state // empty' || true)"
+
+            RESP_C="$(curl -sS -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "$API_CHECKS" || true)"
+            OK_C="$(printf '%s' "$RESP_C" | jq -r '[.check_suites[] | .status + ":" + (.conclusion // "")] | first // empty' || true)"
+
+            if [ "$OK_S" = "success" ] || printf '%s' "$OK_C" | grep -qE 'completed:success'; then
+              READY="yes"; break
+            fi
+            sleep 2
+          done
+
+          echo "ok=${READY}" >> "$GITHUB_OUTPUT"
+          echo "Commit-status gate → statuses=${OK_S:-none} checks=${OK_C:-none}"
+
+      # 5) Previous-trigger guard
+      - name: Previous-trigger guard (skip if same SHA already processed previously)
+        id: prev_guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          CUR="${{ steps.norm.outputs.sha }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TOKEN="${{ secrets.GITHUB_TOKEN }}"
+            API="${{ github.api_url }}/repos/${{ github.repository }}/pulls/${{ steps.norm.outputs.pr }}"
+            BODY="$(curl -sS -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" \
+                    "${API}" | jq -r '.body // ""' 2>/dev/null || true)"
+          else
+            BODY="$(jq -r '.pull_request.body // ""' "$GITHUB_EVENT_PATH" 2>/dev/null || true)"
+          fi
+
+          LAST="$(printf '%s\n' "$BODY" \
+            | grep -i -E '^[[:space:]]*Last-Jenkins-Triggered-SHA[[:space:]]*:' 2>/dev/null \
+            | tail -n1 \
+            | sed -E 's/^[^:]+:[[:space:]]*//I' 2>/dev/null || true)"
+
+          if [ -n "$LAST" ] && [ "$LAST" = "$CUR" ]; then
+            echo "skip=yes" >> "$GITHUB_OUTPUT"
+            echo "Previous-trigger guard: same SHA (${CUR}) found → skipping."
+          else
+            echo "skip=no" >> "$GITHUB_OUTPUT"
+            if [ -z "$LAST" ]; then
+              echo "Previous-trigger guard: no marker found; proceeding."
+            else
+              echo "Previous-trigger guard: marker (${LAST}) differs from current (${CUR}); proceeding."
+            fi
+          fi
+
+      # 6) Collect metadata for GHES side (no longer derive orig_pr here)
+      - name: Collect GHES metadata
+        id: meta
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          PR="${{ steps.norm.outputs.pr }}"
+          SHA="${{ steps.norm.outputs.sha }}"
+          API="${{ github.api_url }}/repos/${{ github.repository }}/pulls/${PR}"
+
+          BODY_FILE="$(mktemp)"
+          CODE="$(curl -sS -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" \
+                   -w "%{http_code}" -o "${BODY_FILE}" "${API}" || echo "000")"
+          if [ "${CODE}" -lt 200 ] || [ "${CODE}" -ge 300 ]; then
+            echo "HTTP ${CODE} while fetching PR"; sed -n '1,200p' "${BODY_FILE}" || true; exit 78
+          fi
+
+          TITLE="$(jq -r '.title // ""' "${BODY_FILE}")"
+          HEAD_REF="$(jq -r '.head.ref // ""' "${BODY_FILE}")"
+          PR_BODY="$(jq -r '.body // ""' "${BODY_FILE}")"
+
+          echo "ghes_owner=${{ github.repository_owner }}" >> "$GITHUB_OUTPUT"
+          echo "ghes_repo=${{ github.event.repository.name }}" >> "$GITHUB_OUTPUT"
+          echo "ghes_pr=${PR}" >> "$GITHUB_OUTPUT"
+          echo "ghes_sha=${SHA}" >> "$GITHUB_OUTPUT"
+          echo "META: TITLE='${TITLE}' HEAD_REF='${HEAD_REF}' BODY_len=$(printf '%s' "$PR_BODY" | wc -c)"
+
+      # 7) Build Jenkins payload safely (heredoc + sed)
+      - name: Build Jenkins payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACTION="Jenkins-Ready"
+
+          GHES_OWNER="${{ steps.meta.outputs.ghes_owner }}"
+          GHES_REPO="${{ steps.meta.outputs.ghes_repo }}"
+          GHES_PR="${{ steps.meta.outputs.ghes_pr }}"
+          GHES_SHA="${{ steps.meta.outputs.ghes_sha }}"
+
+          # External/original PR and repo
+          # 1) Prefer explicit external_pr from workflow_dispatch
+          EXTERNAL_PR_INPUT="${{ github.event.inputs.external_pr || '' }}"
+
+          # 2) Fallback for PR-triggered runs: derive from title "[Fork PR #58] ..."
+          #    (optional but recommended so plain GHES PR events also get the correct external PR)
+          TITLE_API="${{ github.api_url }}/repos/${{ github.repository }}/pulls/${GHES_PR}"
+          TOKEN="${{ secrets.GITHUB_TOKEN }}"
+          TITLE=""
+          EXTERNAL_PR_TITLE=""
+
+          if [ -z "${EXTERNAL_PR_INPUT}" ]; then
+            BODY_FILE="$(mktemp)"
+            CODE="$(curl -sS -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" \
+                     -w "%{http_code}" -o "${BODY_FILE}" "${TITLE_API}" || echo "000")"
+            if [ "${CODE}" -ge 200 ] && [ "${CODE}" -lt 300 ]; then
+              TITLE="$(jq -r '.title // ""' "${BODY_FILE}")"
+              EXTERNAL_PR_TITLE="$(
+                printf '%s\n' "$TITLE" | sed -n 's/.*\[Fork PR #\([0-9]\+\)\].*/\1/p' | head -n1
+              )"
+            fi
+          fi
+
+          if [ -n "${EXTERNAL_PR_INPUT}" ]; then
+            EXTERNAL_PR="${EXTERNAL_PR_INPUT}"
+          elif [ -n "${EXTERNAL_PR_TITLE}" ]; then
+            EXTERNAL_PR="${EXTERNAL_PR_TITLE}"
+          else
+            echo "ERROR: Could not determine external PR number (no external_pr input and title did not match)."
+            exit 1
+          fi
+
+          # External/original repo is always the upstream fork (GitHub.com)
+          EXTERNAL_REPO_FULL="${{ env.ORIG_OWNER }}/${{ env.ORIG_REPO }}"
+
+          # External SHA:
+          # - workflow_dispatch → inputs.head_sha is the external SHA
+          # - GHES pull_request → mirrored SHA == external head SHA for fork PRs
+          EXTERNAL_SHA="${{ github.event.inputs.head_sha || steps.meta.outputs.ghes_sha }}"
+
+          cat >payload.json <<'JSON'
+          {
+            "action": "__ACTION__",
+
+            "pr_number": "__EXTERNAL_PR__",
+            "commit_sha": "__EXTERNAL_SHA__",
+            "repo": "__EXTERNAL_REPO__",
+
+            "orig_pr_num": "__EXTERNAL_PR__",
+            "orig_repo": "__EXTERNAL_REPO__",
+            "orig_sha": "__EXTERNAL_SHA__",
+
+            "ghes_pr": "__GHES_PR__",
+            "ghes_repo": "__GHES_OWNER__/__GHES_REPO__",
+            "ghes_sha": "__GHES_SHA__"
+          }
+          JSON
+
+          sed -i \
+            -e "s|__ACTION__|${ACTION}|g" \
+            -e "s|__EXTERNAL_PR__|${EXTERNAL_PR}|g" \
+            -e "s|__EXTERNAL_SHA__|${EXTERNAL_SHA}|g" \
+            -e "s|__EXTERNAL_REPO__|${EXTERNAL_REPO_FULL}|g" \
+            -e "s|__GHES_PR__|${GHES_PR}|g" \
+            -e "s|__GHES_SHA__|${GHES_SHA}|g" \
+            -e "s|__GHES_OWNER__|${GHES_OWNER}|g" \
+            -e "s|__GHES_REPO__|${GHES_REPO}|g" \
+            payload.json
+
+          echo "Payload:"; jq . payload.json
+
+      # 8) Trigger Jenkins via Generic Webhook
+      - name: Trigger Jenkins via Generic Webhook
+        if: ${{ (github.event_name == 'pull_request' && github.event.action == 'ready_for_review' && steps.rfr_guard.outputs.skip == 'no')
+              || (github.event_name == 'workflow_dispatch'
+                  && steps.prev_guard.outputs.skip != 'yes'
+                  && steps.ready_gate.outputs.ok == 'yes')
+              || (github.event_name == 'pull_request' && github.event.action != 'ready_for_review'
+                  && steps.idem.outputs.skip == 'no'
+                  && steps.prev_guard.outputs.skip != 'yes'
+                  && steps.ready_gate.outputs.ok == 'yes') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL="${{ env.JENKINS_WEBHOOK_URL }}"
+          CODE="$(curl -sS -o /tmp/jenkins.out -w "%{http_code}" \
+                  -X POST -H "Content-Type: application/json" \
+                  --data-binary @payload.json "${URL}" || echo "000")"
+          echo "HTTP=${CODE}"
+          if [ "${CODE}" -lt 200 ] || [ "${CODE}" -ge 300 ]; then
+            sed -n '1,200p' /tmp/jenkins.out || true
+            exit 1
+          fi
+
+  # -----------------------------------------------------------------------------
+  # JOB 2: QGenie Comment Export to NFS
+  # -----------------------------------------------------------------------------
+  export-review-to-nfs:
+    if: >
+      github.event_name == 'issue_comment' &&
+      github.event.comment.user.type == 'Bot' &&
+      contains(github.event.comment.user.login, 'qgenie') &&
+      github.event.issue.pull_request
+    runs-on: [self-hosted, Linux, X64, internal]
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: write
+
+    steps:
+      - name: Derive PR number and NFS path
+        id: json_meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          ISSUE_NUMBER="${{ github.event.issue.number }}"
+          PR_BODY="${{ github.event.issue.body }}"
+          EXTERNAL_PR=""
+          echo "INFO: issue_number=${ISSUE_NUMBER}"
+          echo "INFO: initial PR_BODY length=$(printf '%s' "$PR_BODY" | wc -c)"
+          #
+          # 1) Try markers in the issue/PR body (backward compatible)
+          #
+          if printf '%s\n' "$PR_BODY" | grep -F 'Original-PR-Number:' >/dev/null 2>&1; then
+            EXTERNAL_PR="$(
+              printf '%s\n' "$PR_BODY" \
+                | grep -F 'Original-PR-Number:' \
+                | head -n 1 \
+                | awk -F':' '{print $2}' \
+                | tr -d ' \t\r\n'
+            )"
+            echo "INFO: Derived EXTERNAL_PR from Original-PR-Number: ${EXTERNAL_PR}"
+          fi
+          if [ -z "$EXTERNAL_PR" ]; then
+            if printf '%s\n' "$PR_BODY" | grep -F 'External PR:' >/dev/null 2>&1; then
+              EXTERNAL_PR="$(
+                printf '%s\n' "$PR_BODY" \
+                  | grep -F 'External PR:' \
+                  | head -n 1 \
+                  | awk -F'External PR:' '{print $2}' \
+                  | tr -d ' \t\r\n'
+              )"
+              echo "INFO: Derived EXTERNAL_PR from 'External PR:' marker: ${EXTERNAL_PR}"
+            fi
+          fi
+          #
+          # 2) Fallback: fetch PR via API and derive from title [Fork PR #NN]
+          #    (same idea as in the 'Post feedback to fork PR' workflow)
+          #
+          if [ -z "$EXTERNAL_PR" ]; then
+            echo "INFO: No EXTERNAL_PR from body markers, trying title heuristic via API..."
+            TOKEN="${{ secrets.GITHUB_TOKEN }}"
+            API="${{ github.api_url }}/repos/${{ github.repository }}/pulls/${ISSUE_NUMBER}"
+            BODY_FILE="$(mktemp)"
+            CODE="$(curl -sS \
+                    -H "Authorization: Bearer ${TOKEN}" \
+                    -H "Accept: application/vnd.github+json" \
+                    -w "%{http_code}" -o "${BODY_FILE}" \
+                    "${API}" || echo "000")"
+            if [ "${CODE}" -ge 200 ] && [ "${CODE}" -lt 300 ]; then
+              TITLE="$(jq -r '.title // ""' "${BODY_FILE}")"
+              PR_BODY_API="$(jq -r '.body // ""' "${BODY_FILE}")"
+              echo "INFO: PR title='${TITLE}'"
+              echo "INFO: PR_BODY_API length=$(printf '%s' "$PR_BODY_API" | wc -c)"
+              # Try [Fork PR #NN] pattern from title
+              EXTERNAL_FROM_TITLE="$(
+                printf '%s\n' "$TITLE" \
+                  | sed -n 's/.*\[Fork PR #\([0-9]\+\)\].*/\1/p' \
+                  | head -n1
+              )"
+              if [ -n "$EXTERNAL_FROM_TITLE" ]; then
+                EXTERNAL_PR="${EXTERNAL_FROM_TITLE}"
+                echo "INFO: Derived EXTERNAL_PR from title pattern: ${EXTERNAL_PR}"
+              else
+                echo "INFO: Title did not match [Fork PR #NN] pattern; trying body markers from API body..."
+                # As a secondary fallback, try markers on API body
+                if [ -z "$EXTERNAL_PR" ] && printf '%s\n' "$PR_BODY_API" | grep -F 'Original-PR-Number:' >/dev/null 2>&1; then
+                  EXTERNAL_PR="$(
+                    printf '%s\n' "$PR_BODY_API" \
+                      | grep -F 'Original-PR-Number:' \
+                      | head -n 1 \
+                      | awk -F':' '{print $2}' \
+                      | tr -d ' \t\r\n'
+                  )"
+                  echo "INFO: Derived EXTERNAL_PR from API body Original-PR-Number: ${EXTERNAL_PR}"
+                fi
+                if [ -z "$EXTERNAL_PR" ] && printf '%s\n' "$PR_BODY_API" | grep -F 'External PR:' >/dev/null 2>&1; then
+                  EXTERNAL_PR="$(
+                    printf '%s\n' "$PR_BODY_API" \
+                      | grep -F 'External PR:' \
+                      | head -n 1 \
+                      | awk -F'External PR:' '{print $2}' \
+                      | tr -d ' \t\r\n'
+                  )"
+                  echo "INFO: Derived EXTERNAL_PR from API body 'External PR:' marker: ${EXTERNAL_PR}"
+                fi
+              fi
+            else
+              echo "WARNING: HTTP ${CODE} while fetching PR via API; cannot derive from title/body."
+            fi
+          fi
+          if [ -z "$EXTERNAL_PR" ]; then
+            echo "ERROR: Could not determine external/original PR number (no PR body markers and title did not match)."
+            exit 1
+          fi
+          NFS_BASE="/prj/bdcqranium/qranium-ci/qeff-comments"
+          NFS_DIR="${NFS_BASE}"
+          JSON_PATH="${NFS_DIR}/pr-${EXTERNAL_PR}.json"
+          echo "INFO: Using EXTERNAL_PR=${EXTERNAL_PR}"
+          echo "INFO: NFS_DIR=${NFS_DIR}"
+          echo "INFO: JSON_PATH=${JSON_PATH}"
+          echo "external_pr=${EXTERNAL_PR}" >> "$GITHUB_OUTPUT"
+          echo "nfs_dir=${NFS_DIR}" >> "$GITHUB_OUTPUT"
+          echo "json_path=${JSON_PATH}" >> "$GITHUB_OUTPUT"
+
+      - name: Parse external PR metadata from PR body
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          ISSUE_NUMBER="${{ github.event.issue.number }}"
+          TOKEN="${{ secrets.GITHUB_TOKEN }}"
+          API="${{ github.api_url }}/repos/${{ github.repository }}/pulls/${ISSUE_NUMBER}"
+          BODY_FILE="$(mktemp)"
+          CODE="$(curl -sS \
+                  -H "Authorization: Bearer ${TOKEN}" \
+                  -H "Accept: application/vnd.github+json" \
+                  -w "%{http_code}" -o "${BODY_FILE}" \
+                  "${API}" || echo "000")"
+          if [ "${CODE}" -lt 200 ] || [ "${CODE}" -ge 300 ]; then
+            echo "WARNING: HTTP ${CODE} while fetching PR for metadata; orig_* fields will be empty."
+            PR_BODY=""
+          else
+            PR_BODY="$(jq -r '.body // ""' "${BODY_FILE}")"
+          fi
+          echo "INFO: Metadata PR_BODY length=$(printf '%s' "$PR_BODY" | wc -c)"
+
+          orig_repo=""
+          orig_num=""
+          orig_sha=""
+          orig_branch=""
+
+          if printf '%s\n' "$PR_BODY" | grep -F 'Original-PR-Repo:' >/dev/null 2>&1; then
+            orig_repo="$(printf '%s\n' "$PR_BODY" | sed -n 's/^Original-PR-Repo:[[:space:]]*//p' | head -n 1 | tr -d '\r')"
+          fi
+          if printf '%s\n' "$PR_BODY" | grep -F 'Original-PR-Number:' >/dev/null 2>&1; then
+            orig_num="$(printf '%s\n' "$PR_BODY" | sed -n 's/^Original-PR-Number:[[:space:]]*//p' | head -n 1 | tr -d '\r')"
+          fi
+          if printf '%s\n' "$PR_BODY" | grep -F 'Original-Head-SHA:' >/dev/null 2>&1; then
+            orig_sha="$(printf '%s\n' "$PR_BODY" | sed -n 's/^Original-Head-SHA:[[:space:]]*//p' | head -n 1 | tr -d '\r')"
+          fi
+          if printf '%s\n' "$PR_BODY" | grep -F 'Original-Head-Branch:' >/dev/null 2>&1; then
+            orig_branch="$(printf '%s\n' "$PR_BODY" | sed -n 's/^Original-Head-Branch:[[:space:]]*//p' | head -n 1 | tr -d '\r')"
+          fi
+
+          # NEW: fallback orig_num to external_pr if body has no Original-PR-Number
+          if [ -z "$orig_num" ]; then
+            orig_num="${{ steps.json_meta.outputs.external_pr }}"
+            echo "INFO: orig_num empty; using external_pr fallback: ${orig_num}"
+          fi
+
+          echo "INFO: orig_repo=${orig_repo}"
+          echo "INFO: orig_num=${orig_num}"
+          echo "INFO: orig_sha=${orig_sha}"
+          echo "INFO: orig_branch=${orig_branch}"
+
+          echo "orig_repo=$orig_repo"   >> "$GITHUB_OUTPUT"
+          echo "orig_num=$orig_num"     >> "$GITHUB_OUTPUT"
+          echo "orig_sha=$orig_sha"     >> "$GITHUB_OUTPUT"
+          echo "orig_branch=$orig_branch" >> "$GITHUB_OUTPUT"
+
+      - name: Write structured internal review JSON to NFS (via parser)
+        env:
+          COMMENT_ID: ${{ github.event.comment.id }}
+          NFS_FILE:   ${{ steps.json_meta.outputs.json_path }}
+          PR_NUMBER:  ${{ steps.json_meta.outputs.external_pr }}
+          NFS_DIR:    ${{ steps.json_meta.outputs.nfs_dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${NFS_DIR}"
+          RAW_FILE="/tmp/internal_review_comment_raw.txt"
+          COMMENT_RAW="$(jq -r '.comment.body // ""' "${GITHUB_EVENT_PATH}")"
+          printf '%s' "${COMMENT_RAW}" > "${RAW_FILE}"
+          PARSER_SCRIPT="/prj/bdcqranium/qranium-ci/qeff-comments/Json-Parser/qgenie_parse_review.py"
+          if [ ! -f "${PARSER_SCRIPT}" ]; then
+            echo "ERROR: Parser script not found: ${PARSER_SCRIPT}"
+            exit 1
+          fi
+          echo "Running parser (sanitization happens inside parser)..."
+          PR_NUMBER="${PR_NUMBER}" COMMENT_ID="${COMMENT_ID}" NFS_FILE="${NFS_FILE}" \
+            python3 "${PARSER_SCRIPT}" "${RAW_FILE}"
+          echo "JSON written to: ${NFS_FILE}"
+          echo "Preview of JSON (first 400 chars):"
+          head -c 400 "${NFS_FILE}" || true
+          echo ""
+
+      - name: Trigger external internal-review-summary workflow
+        # Only require orig_num; external workflow will resolve branch/SHA via PR API
+        if: ${{ steps.meta.outputs.orig_num != '' }}
+        env:
+          GH_COM_PAT:             ${{ secrets.GH_COM_PAT }}
+          EXTERNAL_OWNER_REPO:    qraniumcitest/efficient-transformers
+          EXTERNAL_PR_NUMBER:     ${{ steps.meta.outputs.orig_num }}
+          EXTERNAL_WORKFLOW_FILE: mirror-fork-pr-and-internal-review.yml
+          EXTERNAL_WORKFLOW_REF:  main
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_COM_PAT}" ]; then
+            echo "ERROR: GH_COM_PAT is not set"
+            exit 1
+          fi
+          echo "Triggering external workflow: repo=${EXTERNAL_OWNER_REPO} pr=${EXTERNAL_PR_NUMBER} ref=${EXTERNAL_WORKFLOW_REF}"
+          curl -sS -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GH_COM_PAT}" \
+            "https://api.github.com/repos/${EXTERNAL_OWNER_REPO}/actions/workflows/${EXTERNAL_WORKFLOW_FILE}/dispatches" \
+            -d @- <<EOF
+          {
+            "ref": "${EXTERNAL_WORKFLOW_REF}",
+            "inputs": {
+              "pr_number": "${EXTERNAL_PR_NUMBER}",
+              "orig_repo": "${EXTERNAL_OWNER_REPO}"
+            }
+          }
+          EOF
