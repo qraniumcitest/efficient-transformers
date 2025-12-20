@@ -8,7 +8,7 @@
 import os
 import shutil
 
-import numpy as np
+import numpy as n
 import pytest
 import requests
 import torch.optim as optim
@@ -391,3 +391,4 @@ def test_finetune_assert(
 
     if dataset_name == "alpaca_dataset":
         clean_up(alpaca_json_path)
+
