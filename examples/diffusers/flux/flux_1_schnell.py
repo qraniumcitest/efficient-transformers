@@ -34,7 +34,6 @@ output = pipeline(
     parallel_compile=True,
     use_onnx_subfunctions=False,
 )
-
 # Extract the generated image from the output
 image = output.images[0]
 
