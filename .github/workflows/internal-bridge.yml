@@ -31,6 +31,9 @@ jobs:
   # JOB 1: Post feedback to fork PR (event-driven, synchronize-always)
   # -----------------------------------------------------------------------------
   trigger_jenkins_on_commit:
+    # 🔹 Only run this job for PR events or manual dispatch
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
+
     name: "Post feedback for PR #${{ github.event.pull_request.number || github.event.inputs.pr_number }}"
     runs-on: [self-hosted, linux, x64, internal]
     permissions:
@@ -513,7 +516,7 @@ jobs:
           GH_COM_PAT:             ${{ secrets.GH_COM_PAT }}
           EXTERNAL_OWNER_REPO:    qraniumcitest/efficient-transformers
           EXTERNAL_PR_NUMBER:     ${{ steps.meta.outputs.orig_num }}
-          EXTERNAL_WORKFLOW_FILE: mirror-fork-pr-and-internal-review.yml
+          EXTERNAL_WORKFLOW_FILE: internal-review-summary.yml
           EXTERNAL_WORKFLOW_REF:  main
         shell: bash
         run: |
