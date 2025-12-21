@@ -221,8 +221,8 @@ jobs:
           fi
           echo "✅ workflow_dispatch accepted (204)"
 
-      # 🔚 Upstream closed → mirror external main into GHES main and cleanup mirrored branch
-      - name: Propagate upstream closure to GHES (mirror external main)
+      # 🔚 Upstream closed → mirror external main on merge, always cleanup mirrored branch/PR
+      - name: Propagate upstream closure to GHES (mirror external main + cleanup)
         if: github.event.action == 'closed'
         env:
           GHES_PAT:   ${{ secrets.GHES_PAT   }}
@@ -234,39 +234,42 @@ jobs:
           MERGED="${{ github.event.pull_request.merged }}"
           echo "Upstream PR #${PR_NUM} closed; merged=${MERGED}"
 
-          if [[ "$MERGED" != "true" ]]; then
-            echo "Upstream PR closed without merge → nothing to mirror."
-            exit 0
-          fi
-
-          REPO_SLUG="${GITHUB_REPOSITORY}"  # e.g. qraniumcitest/efficient-transformers
-          echo "Mirroring external main (${GITHUB_SERVER_URL}/${REPO_SLUG}.git) to GHES main (${GHES_BASE_URL}/${GHES_OWNER}/${GHES_REPO}.git)"
-
-          # 1) Clone GHES mirror
-          git clone "https://${GHES_USER}:${GHES_PAT}@github.qualcomm.com/${GHES_OWNER}/${GHES_REPO}.git" ghes-mirror
-          cd ghes-mirror
-
-          # 2) Add external as upstream
-          git remote add upstream "${GITHUB_SERVER_URL}/${REPO_SLUG}.git"
-
-          # 3) Fetch upstream main
-          git fetch upstream main
-
-          # 4) Reset local main to upstream/main
-          if git show-ref --verify --quiet refs/heads/main; then
-            git checkout main
-          else
-            git checkout -b main
-          fi
-          git reset --hard upstream/main
-
-          # 5) Force-push main to GHES
-          git push --force origin main
-
-          # 6) Cleanup mirrored branch on GHES (fork-pr-N)
           BRANCH="fork-pr-${PR_NUM}"
           API_BASE="${GHES_BASE_URL}/api/v3/repos/${GHES_OWNER}/${GHES_REPO}"
 
+          if [[ "$MERGED" == "true" ]]; then
+            echo "Upstream PR merged → mirroring external main into GHES main."
+
+            REPO_SLUG="${GITHUB_REPOSITORY}"  # e.g. qraniumcitest/efficient-transformers
+            echo "Mirroring external main (${GITHUB_SERVER_URL}/${REPO_SLUG}.git) to GHES main (${GHES_BASE_URL}/${GHES_OWNER}/${GHES_REPO}.git)"
+
+            # 1) Clone GHES mirror
+            git clone "https://${GHES_USER}:${GHES_PAT}@github.qualcomm.com/${GHES_OWNER}/${GHES_REPO}.git" ghes-mirror
+            cd ghes-mirror
+
+            # 2) Add external as upstream
+            git remote add upstream "${GITHUB_SERVER_URL}/${REPO_SLUG}.git"
+
+            # 3) Fetch upstream main
+            git fetch upstream main
+
+            # 4) Reset local main to upstream/main
+            if git show-ref --verify --quiet refs/heads/main; then
+              git checkout main
+            else
+              git checkout -b main
+            fi
+            git reset --hard upstream/main
+
+            # 5) Force-push main to GHES
+            git push --force origin main
+
+            cd ..
+          else
+            echo "Upstream PR closed without merge → will only cleanup GHES PR/branch (no main mirror)."
+          fi
+
+          # Common cleanup for both merged and non-merged closes
           echo "Closing any GHES PR for branch ${BRANCH} (if exists)..."
           RESP="$(curl -sS -H "Authorization: token ${GHES_PAT}" -H "Accept: application/vnd.github+json" \
                     "${API_BASE}/pulls?state=all&head=${GHES_OWNER}:${BRANCH}" -w "\n%{http_code}" || echo)"
@@ -295,4 +298,4 @@ jobs:
             echo "WARNING: Branch delete did not return 204/404 → check protections; continuing anyway."
           fi
 
-          echo "✅ GHES main now mirrors external main; mirrored branch cleaned up."
+          echo "✅ GHES cleanup complete (merged=${MERGED})."
