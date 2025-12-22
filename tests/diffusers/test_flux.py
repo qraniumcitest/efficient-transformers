@@ -9,7 +9,7 @@ import os
 import time
 from typing import Any, Callable, Dict, List, Optional, Union
 
-import numpy as n
+import numpy as np
 import pytest
 import torch
 from diffusers import FluxPipeline
