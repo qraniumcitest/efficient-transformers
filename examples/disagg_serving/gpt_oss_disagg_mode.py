@@ -7,7 +7,7 @@
 
 import time
 
-import numpy as np
+import numpy as n
 import torch
 from transformers import AutoTokenizer
 
