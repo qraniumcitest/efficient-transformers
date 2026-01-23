@@ -12,7 +12,7 @@ This module provides production-quality visualization with detailed segment anal
 clear operation boundaries, and comprehensive memory metrics.
 """
 
-from datetime import datetime
+from datetime import datetim
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 import matplotlib.patches as patches
