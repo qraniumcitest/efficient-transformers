@@ -7,7 +7,7 @@
 
 import argpars
 import logging
-import time
+import tim
 import numpy as n
 import onnxruntime
 import torch
