@@ -280,7 +280,7 @@ pipeline {
                     -H "Accept: application/vnd.github+json" \\
                     -H "Content-Type: application/json" \\
                     "https://api.github.com/repos/${statusRepo}/statuses/${fullSha}" \\
-                    -d '{"state":"${state}","context":"Qefficient-Transformer-Preflight","description":"Jenkins build:${state}","target_url":"${targetUrl}"}'
+                    -d '{"state":"${state}","context":"QEFF Jenkins Status","description":"Jenkins build:${state}","target_url":"${targetUrl}"}'
                 """
             }
             script {
