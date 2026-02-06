@@ -9,6 +9,18 @@ pipeline {
     }
 
    stages {
+        stage('Checkout') {
+            steps {
+                deleteDir()
+                git url: 'https://github.com/qraniumcitest/efficient-transformers.git', branch: 'main'
+                script {
+                    if (params.commit_sha?.trim()) {
+                        sh "git checkout ${params.commit_sha} && whoami"
+                        echo "Checked out commit: ${params.commit_sha}"
+                    }
+                }
+            }
+        }
        stage('Install QEfficient') {
            steps {
                sh '''
@@ -227,6 +239,51 @@ pipeline {
                 }
             }
             script {
+                // Minimal fields for the GitHub Statuses API
+                def state     = currentBuild.currentResult == 'SUCCESS' ? 'success' : 'failure'
+                def targetUrl = env.BUILD_URL
+
+                // Status target (external repo + commit); keep your fallbacks
+                def statusRepo = (env.orig_repo?.trim()) ?: 'qraniumcitest/efficient-transformers'
+                def fullSha    = (env.orig_sha?.trim())  ?: (env.commit_sha?.trim())
+
+                // Keep your existing token variable as-is
+                def githubToken = env.githubToken
+
+                if (!statusRepo || !statusRepo.contains('/')) {
+                    error("Invalid status target repo: '${statusRepo}' (expected owner/repo)")
+                }
+                if (!fullSha || fullSha.length() < 40) {
+                    // If you prefer to skip normalization, remove this check.
+                    // Otherwise normalize to 40 chars (optional):
+                    sh """
+                    bash -e -o pipefail -c '
+                        FULL_SHA=\$(git rev-parse --verify ${fullSha}^{commit} 2>/dev/null || echo ${fullSha})
+                        echo "\$FULL_SHA" > .full_sha
+                    '
+                    """
+                    fullSha = readFile('.full_sha').trim()
+                }
+                if (fullSha.length() != 40) {
+                    error("Commit SHA must be 40 chars; got '${fullSha}' (${fullSha.length()})")
+                }
+
+                // Minimal inline JSON: only state + target_url (and context for display)
+                // def context = 'Qefficient-Transformer-Preflight'
+                // if (context.length() > 100) context = context.substring(0, 100) // API limit
+                // def body = """{"state":"${state}","context":"${context}","target_url":"${targetUrl}"}"""
+
+                // Single, concise curl (no jq, no here-doc)
+                sh """
+                    curl -sS -X POST \\
+                    -H "Authorization: token ${githubToken}" \\
+                    -H "Accept: application/vnd.github+json" \\
+                    -H "Content-Type: application/json" \\
+                    "https://api.github.com/repos/${statusRepo}/statuses/${fullSha}" \\
+                    -d '{"state":"${state}","context":"QEFF Jenkins Status","description":"Jenkins build:${state}","target_url":"${targetUrl}"}'
+                """
+            }
+            script {
                 try {
                     sh '''
                     sudo docker rm -f ${BUILD_TAG}
@@ -234,9 +291,9 @@ pipeline {
                 } catch (error) {
                     echo "Failed to delete container ${BUILD_TAG}: ${error}"
                 }
+                echo 'Cleaning Workspace'
+                deleteDir()
             }
-            echo 'Cleaning Workspace'
-            deleteDir()
         }
         // unsuccessful {
         //     script {
