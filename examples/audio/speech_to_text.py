@@ -5,7 +5,7 @@
 #
 # -----------------------------------------------------------------------------
 
-import argparse
+import argpars
 
 from datasets import load_dataset
 from transformers import AutoProcessor
