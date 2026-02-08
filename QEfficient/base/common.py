@@ -22,7 +22,7 @@ from QEfficient.transformers.modeling_utils import EXTERNAL_MODEL_CLASS_MAPPING,
 from QEfficient.utils import login_and_download_hf_lm
 
 
-class QEFFCommonLoader:
+clas QEFFCommonLoader:
     """
     Provides HuggingFace model loading interface same as transformers APIs.
     Supports loading any model on HuggingFace.
