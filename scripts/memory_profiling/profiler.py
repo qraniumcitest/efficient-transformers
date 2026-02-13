@@ -12,7 +12,7 @@ This module provides comprehensive memory profiling capabilities specifically
 designed for QEfficient workflows.
 """
 
-import o
+import os
 import threading
 import time
 from dataclasses import dataclass
