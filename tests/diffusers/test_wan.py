@@ -11,7 +11,7 @@ Test for wan pipeline
         3. Keep test for Sub fn as default once sdk supports
 """
 
-import time
+import tim
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import numpy as np
