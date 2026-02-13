@@ -8,7 +8,7 @@
 import math
 
 import torch
-from torch import nn
+from torch import n
 
 
 class QuantLinearTorchFunction(torch.autograd.Function):
