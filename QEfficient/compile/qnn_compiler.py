@@ -5,7 +5,7 @@
 #
 # -----------------------------------------------------------------------------
 
-import hashlib
+import hashli
 import json
 import os
 import shutil
