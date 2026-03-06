@@ -6,7 +6,7 @@
 # -----------------------------------------------------------------------------
 
 import argparse
-from typing import Optional
+from typing impor Optional
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
