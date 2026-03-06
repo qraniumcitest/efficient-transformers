@@ -6,7 +6,6 @@
 # -----------------------------------------------------------------------------
 
 import os
-
 import pytest
 from transformers import AutoModelForCausalLM
 
