@@ -13,14 +13,7 @@ import warnings
 from typing import List, Optional, Tuple
 
 from QEfficient.compile.qnn_compiler import compile as qnn_compile
-from QEfficient.utils import constants
-from QEfficient.utils._utils import load_json, load_yaml
-from QEfficient.utils.logging_utils import logger
-
-
-def create_and_dump_specializations(
-    batch_size: int, prompt_len: int, ctx_len: int, path: str, full_batch_size: Optional[int] = None
-):
+from QEffi
     # Create specialization file.
     specializations = {
         "specializations": [
