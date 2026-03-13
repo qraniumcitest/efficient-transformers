@@ -10,7 +10,6 @@ import shutil
 import sys
 from logging import info
 from typing import Dict, List, Tuple, Union
-
 import numpy as np
 import onnx
 import onnxruntime
