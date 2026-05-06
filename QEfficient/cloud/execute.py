@@ -9,8 +9,7 @@ import argparse
 from typing import List, Optional
 
 from QEfficient.generation.text_generation_inference import cloud_ai_100_exec_kv
-from QEfficient.utils import load_hf_tokenizer
-
+from QEfficient.utils import load_hf_tokenize
 
 def main(
     model_name: str,
